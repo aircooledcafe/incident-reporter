@@ -6,12 +6,12 @@ services:
     container_name: incident-reporter-backend
     restart: unless-stopped
     environment:
-      - DJANGO_DEBUG=${DJANGO_DEBUG:-False}
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?Error: DJANGO_SECRET_KEY must be set in .env or environment}
-      - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-*}
-      - DJANGO_DB_PATH=/data/db/db.sqlite3
-      - DJANGO_ARTIFACTS_ROOT=/data/artifacts
-      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-3}
+      DJANGO_DEBUG: "${DJANGO_DEBUG:-False}"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY must be set in .env or environment}"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
+      DJANGO_DB_PATH: "/data/db/db.sqlite3"
+      DJANGO_ARTIFACTS_ROOT: "/data/artifacts"
+      GUNICORN_WORKERS: "${GUNICORN_WORKERS:-3}"
     volumes:
       # Mapped host storage for SQLite database (persists across rebuilds, migrations, and updates)
       - ./data/db:/data/db
