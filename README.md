@@ -43,7 +43,7 @@ A full-stack incident response evidence recording, chronological timeline constr
 
 ### 1. Clone the Repository
 ```bash
-git clone <YOUR_GITHUB_REPO_URL> incident-reporter
+git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
 cd incident-reporter
 ```
 
