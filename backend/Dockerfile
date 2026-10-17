@@ -17,7 +17,8 @@ COPY requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app/backend/
-RUN chmod +x /app/backend/entrypoint.sh && \
+RUN sed -i 's/\r$//' /app/backend/entrypoint.sh && \
+    chmod +x /app/backend/entrypoint.sh && \
     mkdir -p /data/db /data/artifacts
 
 VOLUME ["/data/db", "/data/artifacts"]

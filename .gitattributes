@@ -1,0 +1,4 @@
+# Ensure shell scripts and Dockerfiles always use LF line endings, even when cloned on Windows
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
