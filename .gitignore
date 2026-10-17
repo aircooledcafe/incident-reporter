@@ -23,7 +23,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Investigation Artifacts & Generated Reports (keep folder, ignore local case data)
+# Mapped Docker Database & Investigation Artifacts (keep folders, ignore local data)
+data/db/*
+!data/db/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
 

@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: incident-reporter-backend
+    restart: unless-stopped
+    environment:
+      - DJANGO_DEBUG=${DJANGO_DEBUG:-False}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-soc-incident-reporter-docker-secret-key-change-in-prod}
+      - DJANGO_DB_PATH=/data/db/db.sqlite3
+      - DJANGO_ARTIFACTS_ROOT=/data/artifacts
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-3}
+    volumes:
+      # Mapped host storage for SQLite database (persists across rebuilds, migrations, and updates)
+      - ./data/db:/data/db
+      # Mapped host storage for investigation project folders, screenshots, and generated reports
+      - ./artifacts:/data/artifacts
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: incident-reporter-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${APP_PORT:-5173}:80"

@@ -33,7 +33,40 @@ A full-stack incident response evidence recording, chronological timeline constr
 
 ---
 
-## Local Deployment Guide
+## Docker Deployment (Recommended for Server / LAN Hosting)
+
+The project includes a two-container Docker Compose setup (`backend` running Django `5.1.14` + Gunicorn, and `frontend` compiling the React `19.2.6` bundle and serving it via Nginx with `/api/` and `/artifacts/` reverse-proxied to `backend`).
+
+### Persistent Mapped Storage
+Key application data is stored outside the container images in mapped host directories so that **all database records, project folders, screenshots, and generated reports persist across container rebuilds, schema migrations, and code updates**:
+
+| Host Directory | Container Path | Purpose |
+| :--- | :--- | :--- |
+| `./data/db` | `/data/db` | Stores the SQLite database (`db.sqlite3` via `DJANGO_DB_PATH=/data/db/db.sqlite3`). |
+| `./artifacts` | `/data/artifacts` | Stores all investigation project folders (`project_<id>_<slug>/`), uploaded screenshots, generated `.csv`/`.odt`/`.md`/`.zip` reports, and `archive_manifest.json` (`DJANGO_ARTIFACTS_ROOT=/data/artifacts`). |
+
+### 1. Start with Docker Compose
+```bash
+git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
+cd incident-reporter
+
+docker compose up -d --build
+```
+- **Web UI (Nginx + React)**: `http://<SERVER_IP>:5173`
+- **Backend API (Direct)**: `http://<SERVER_IP>:8000/api/`
+- On every container startup, `backend/entrypoint.sh` automatically creates `/data/db` and `/data/artifacts` if needed and runs `python manage.py migrate --noinput` against `/data/db/db.sqlite3`.
+
+### 2. Updating & Applying Migrations Without Data Loss
+When pulling new updates or branches from Git, rebuild and restart the containers:
+```bash
+git pull
+docker compose up -d --build
+```
+Because `./data/db` and `./artifacts` live on the host filesystem, rebuilding the images replaces only the application code and automatically runs any new Django migrations against your existing `/data/db/db.sqlite3`.
+
+---
+
+## Local Development Deployment Guide (Without Docker)
 
 ### Prerequisites
 - **Python** `3.10+` (or [`uv`](https://docs.astral.sh/uv/))

@@ -4,16 +4,20 @@ Django settings for config project.
 Tagged to Django 5.1.14.
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-&b4kvc^l7z%8+87+@%fv1t$*0s068s68c&@tpm&&=cww9*na$5'
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-&b4kvc^l7z%8+87+@%fv1t$*0s068s68c&@tpm&&=cww9*na$5',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() in ('1', 'true', 'yes')
 
 ALLOWED_HOSTS = ['*']
 
@@ -68,11 +72,14 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
+# Supports DJANGO_DB_PATH for mapped Docker volume persistence across container rebuilds/updates.
+DB_PATH = Path(os.environ.get('DJANGO_DB_PATH', str(BASE_DIR / 'db.sqlite3')))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DB_PATH,
     }
 }
 
@@ -112,9 +119,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Artifacts & Media directory for incident investigations and archives
-ARTIFACTS_ROOT = BASE_DIR.parent / 'artifacts'
+# Supports DJANGO_ARTIFACTS_ROOT for mapped Docker volume persistence across container rebuilds/updates.
+ARTIFACTS_ROOT = Path(os.environ.get('DJANGO_ARTIFACTS_ROOT', str(BASE_DIR.parent / 'artifacts')))
+ARTIFACTS_ROOT.mkdir(parents=True, exist_ok=True)
 MEDIA_URL = '/artifacts/'
 MEDIA_ROOT = ARTIFACTS_ROOT
 
