@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -e
 
+if [ -z "${DJANGO_SECRET_KEY}" ]; then
+    echo "ERROR: DJANGO_SECRET_KEY environment variable is not set." >&2
+    echo "Copy .env.example to .env and set DJANGO_SECRET_KEY before starting the containers." >&2
+    exit 1
+fi
+
 # Ensure mapped volume directories exist
 mkdir -p "$(dirname "${DJANGO_DB_PATH:-/data/db/db.sqlite3}")"
 mkdir -p "${DJANGO_ARTIFACTS_ROOT:-/data/artifacts}"

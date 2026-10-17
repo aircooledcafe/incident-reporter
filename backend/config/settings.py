@@ -6,20 +6,47 @@ Tagged to Django 5.1.14.
 
 import os
 from pathlib import Path
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-&b4kvc^l7z%8+87+@%fv1t$*0s068s68c&@tpm&&=cww9*na$5',
-)
+
+def _load_dotenv_file(dotenv_path: Path) -> None:
+    """Load key=value pairs from a .env file into os.environ if not already set."""
+    if not dotenv_path.is_file():
+        return
+    for raw_line in dotenv_path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, _, value = line.partition('=')
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
+
+
+# Automatically load root .env or backend/.env for local commands if present
+_load_dotenv_file(BASE_DIR.parent / '.env')
+_load_dotenv_file(BASE_DIR / '.env')
+
+# SECURITY: Require DJANGO_SECRET_KEY from environment (no hardcoded fallback secrets)
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '').strip()
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        'The DJANGO_SECRET_KEY environment variable is required and must not be empty. '
+        'Copy .env.example to .env and set a generated secret key before starting.'
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() in ('1', 'true', 'yes')
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('1', 'true', 'yes')
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
+    if h.strip()
+]
 
 
 # Application definition

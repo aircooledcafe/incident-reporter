@@ -33,6 +33,38 @@ A full-stack incident response evidence recording, chronological timeline constr
 
 ---
 
+## Required Secrets & Environment Variables (`.env`)
+
+No secrets are hardcoded in the repository. Before starting the application (either with Docker Compose or locally), you must create a `.env` file in the project root from `.env.example` and set **`DJANGO_SECRET_KEY`**.
+
+### Environment Variables Reference
+
+| Variable | Required | Default | Description |
+| :--- | :---: | :--- | :--- |
+| `DJANGO_SECRET_KEY` | **Yes** | *(None — refuses to start if unset)* | Cryptographic secret key used by Django for signing sessions and tokens. |
+| `DJANGO_DEBUG` | No | `False` | Enables Django debug mode (`True` or `False`). Keep `False` in production/Docker. |
+| `DJANGO_ALLOWED_HOSTS` | No | `*` | Comma-separated list of allowed hostnames/IPs (e.g., `localhost,127.0.0.1,192.168.1.50`). |
+| `APP_PORT` | No | `5173` | Host port exposed by the frontend Nginx container in Docker Compose. |
+| `GUNICORN_WORKERS` | No | `3` | Number of Gunicorn worker processes in the backend Docker container. |
+| `DJANGO_DB_PATH` | No | `/data/db/db.sqlite3` (Docker) or `backend/db.sqlite3` (Local) | File path to the SQLite database. |
+| `DJANGO_ARTIFACTS_ROOT` | No | `/data/artifacts` (Docker) or `artifacts/` (Local) | Directory path where investigation project folders, screenshots, and reports are stored. |
+
+### Initial Secret Setup (One-Liner)
+From the project root directory, copy `.env.example` to `.env` and generate a cryptographically strong `DJANGO_SECRET_KEY`:
+
+```bash
+cp .env.example .env
+# Generate a random secret key and write it into .env (works on Linux & macOS):
+python3 -c '
+import pathlib, secrets
+p = pathlib.Path(".env")
+p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={secrets.token_urlsafe(50)}"))
+'
+```
+*(Alternatively, run `openssl rand -base64 48` and paste the output after `DJANGO_SECRET_KEY=` inside `.env`.)*
+
+---
+
 ## Docker Deployment (Recommended for Server / LAN Hosting)
 
 The project includes a two-container Docker Compose setup (`backend` running Django `5.1.14` + Gunicorn, and `frontend` compiling the React `19.2.6` bundle and serving it via Nginx with `/api/` and `/artifacts/` reverse-proxied to `backend`).
@@ -45,16 +77,21 @@ Key application data is stored outside the container images in mapped host direc
 | `./data/db` | `/data/db` | Stores the SQLite database (`db.sqlite3` via `DJANGO_DB_PATH=/data/db/db.sqlite3`). |
 | `./artifacts` | `/data/artifacts` | Stores all investigation project folders (`project_<id>_<slug>/`), uploaded screenshots, generated `.csv`/`.odt`/`.md`/`.zip` reports, and `archive_manifest.json` (`DJANGO_ARTIFACTS_ROOT=/data/artifacts`). |
 
-### 1. Start with Docker Compose
+### 1. Configure `.env` and Start with Docker Compose
 ```bash
 git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
 cd incident-reporter
 
+# 1. Create .env and set DJANGO_SECRET_KEY
+cp .env.example .env
+# Edit .env to set DJANGO_SECRET_KEY (or run the python3 one-liner above)
+
+# 2. Build and start containers
 docker compose up -d --build
 ```
 - **Web UI (Nginx + React)**: `http://<SERVER_IP>:5173`
 - **Backend API (Direct)**: `http://<SERVER_IP>:8000/api/`
-- On every container startup, `backend/entrypoint.sh` automatically creates `/data/db` and `/data/artifacts` if needed and runs `python manage.py migrate --noinput` against `/data/db/db.sqlite3`.
+- On every container startup, `backend/entrypoint.sh` verifies `DJANGO_SECRET_KEY` is present, creates `/data/db` and `/data/artifacts` if needed, and runs `python manage.py migrate --noinput` against `/data/db/db.sqlite3`.
 
 ### 2. Updating & Applying Migrations Without Data Loss
 When pulling new updates or branches from Git, rebuild and restart the containers:
@@ -74,14 +111,16 @@ Because `./data/db` and `./artifacts` live on the host filesystem, rebuilding th
 
 ---
 
-### 1. Clone the Repository
+### 1. Clone the Repository & Configure `.env`
 ```bash
 git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
 cd incident-reporter
+cp .env.example .env
+# Set DJANGO_SECRET_KEY in .env (e.g. using `openssl rand -base64 48`)
 ```
 
 ### 2. Backend Setup (Django 5.1.14)
-Create a virtual environment in `backend/.venv`, install dependencies, and run database migrations:
+Create a virtual environment in `backend/.venv`, install dependencies, and run database migrations (Django automatically loads `../.env`):
 
 ```bash
 cd backend
