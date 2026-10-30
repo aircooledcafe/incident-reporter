@@ -93,6 +93,8 @@ erDiagram
     auth_user ||--|| UserProfile : "has role & profile (profile)"
     auth_user ||--o| authtoken_token : "has API token"
     auth_user ||--o{ Project : "locks (locked_projects)"
+    auth_user ||--o{ EvidenceItem : "creates (created_evidence_items)"
+    auth_user ||--o{ EvidenceScreenshot : "uploads (created_evidence_screenshots)"
     Project ||--o{ RelatedIncident : "has many (related_incidents)"
     Project ||--o{ CustomerContact : "has many (customer_contacts)"
     Project ||--o{ ExternalResearch : "has many (external_research_items)"
@@ -217,6 +219,7 @@ erDiagram
     EvidenceScreenshot {
         int id PK
         int evidence_id FK
+        int created_by_id FK "Nullable -> auth_user (uploader)"
         file image "Stored under artifacts/<project_folder>/screenshots/"
         string caption
         string analyst_name

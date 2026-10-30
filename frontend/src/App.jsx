@@ -284,9 +284,10 @@ export default function App() {
   const [researchLink, setResearchLink] = useState('');
   const [researchSummary, setResearchSummary] = useState('');
 
-  // Evidence item detail popup, delete confirmation popup & Screenshot Lightbox Modal
+  // Evidence item detail popup, delete confirmation popups & Screenshot Lightbox Modal
   const [detailEvidenceId, setDetailEvidenceId] = useState(null);
   const [deleteTargetEvidence, setDeleteTargetEvidence] = useState(null);
+  const [deleteTargetScreenshot, setDeleteTargetScreenshot] = useState(null);
   const [previewScreenshot, setPreviewScreenshot] = useState(null);
 
   // Timeline filters
@@ -934,16 +935,32 @@ export default function App() {
     }
   };
 
-  const handleDeleteScreenshot = async (screenshotId) => {
-    if (!activeProject || !canModifyActiveProject) return;
+  const canUserDeleteScreenshot = (shot) => {
+    if (!shot || !canModifyActiveProject) return false;
+    if (typeof shot.can_actor_delete === 'boolean') {
+      return shot.can_actor_delete;
+    }
+    return Boolean(canLockProjects || (authUser && shot.created_by === authUser.id));
+  };
+
+  const requestDeleteScreenshot = (shot) => {
+    if (!canUserDeleteScreenshot(shot)) return;
+    setDeleteTargetScreenshot(shot);
+  };
+
+  const handleConfirmDeleteScreenshot = async () => {
+    if (!activeProject || !deleteTargetScreenshot) return;
+    const screenshotId = deleteTargetScreenshot.id;
     try {
       await api.deleteScreenshot(screenshotId);
+      setDeleteTargetScreenshot(null);
       if (previewScreenshot && previewScreenshot.id === screenshotId) {
         setPreviewScreenshot(null);
       }
       await handleSelectProject(activeProject.id);
       notifySuccess('Screenshot deleted from event.');
     } catch (err) {
+      setDeleteTargetScreenshot(null);
       handleApiError(err, 'Failed to delete screenshot');
     }
   };
@@ -1293,7 +1310,7 @@ export default function App() {
               SOC Investigations
             </Navbar.Brand>
 
-            <div className="d-flex align-items-center gap-1">
+            <div className="d-flex align-items-center gap-1 flex-wrap">
               <Button
                 size="sm"
                 className={mainView === 'home' ? 'btn-lb-primary' : ''}
@@ -1312,6 +1329,31 @@ export default function App() {
                 <FolderOpen size={14} className="me-1" />
                 Investigations
               </Button>
+              {canManageUsers && (
+                <Button
+                  size="sm"
+                  className={mainView === 'users' ? 'btn-lb-primary' : ''}
+                  variant={mainView === 'users' ? undefined : 'outline-secondary'}
+                  onClick={() => setMainView('users')}
+                >
+                  <Users size={14} className="me-1" />
+                  User Account Management
+                </Button>
+              )}
+              {canAccessDbAdmin && (
+                <Button
+                  as="a"
+                  href="/admin/"
+                  target="_blank"
+                  rel="noreferrer"
+                  size="sm"
+                  variant="outline-secondary"
+                >
+                  <Database size={14} className="me-1" />
+                  Django Database Management
+                  <ExternalLink size={12} className="ms-1" />
+                </Button>
+              )}
             </div>
           </div>
 
@@ -3318,14 +3360,16 @@ export default function App() {
                             className="screenshot-thumb"
                             onClick={() => setPreviewScreenshot(shot)}
                           />
-                          <Button
-                            variant="outline-danger"
-                            size="sm"
-                            onClick={() => handleDeleteScreenshot(shot.id)}
-                          >
-                            <Trash2 size={13} className="me-1" />
-                            Delete
-                          </Button>
+                          {canUserDeleteScreenshot(shot) && (
+                            <Button
+                              variant="outline-danger"
+                              size="sm"
+                              onClick={() => requestDeleteScreenshot(shot)}
+                            >
+                              <Trash2 size={13} className="me-1" />
+                              Delete
+                            </Button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -3386,11 +3430,12 @@ export default function App() {
         defangText={defangText}
         canModifyActiveProject={canModifyActiveProject}
         canDeleteItem={canUserDeleteEvidenceItem(detailEvidenceItem)}
+        canDeleteScreenshot={canUserDeleteScreenshot}
         onToggleKey={handleToggleKeyEvidence}
         onEdit={openEditEvidenceModal}
         onDelete={requestDeleteEvidence}
         onPreviewScreenshot={(shot) => setPreviewScreenshot(shot)}
-        onDeleteScreenshot={handleDeleteScreenshot}
+        onDeleteScreenshot={requestDeleteScreenshot}
       />
 
       {/* Warning Modal: Confirm Deleting a Timeline Evidence Item */}
@@ -3463,11 +3508,11 @@ export default function App() {
         </Modal.Body>
         <Modal.Footer className="bg-dark border-secondary justify-content-between">
           <div>
-            {previewScreenshot && canModifyActiveProject && (
+            {previewScreenshot && canUserDeleteScreenshot(previewScreenshot) && (
               <Button
                 variant="outline-danger"
                 size="sm"
-                onClick={() => handleDeleteScreenshot(previewScreenshot.id)}
+                onClick={() => requestDeleteScreenshot(previewScreenshot)}
               >
                 <Trash2 size={14} className="me-1" />
                 Delete Screenshot
@@ -3476,6 +3521,64 @@ export default function App() {
           </div>
           <Button variant="outline-secondary" size="sm" onClick={() => setPreviewScreenshot(null)}>
             Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Warning Modal: Confirm Deleting an Attached Screenshot */}
+      <Modal
+        show={Boolean(deleteTargetScreenshot)}
+        onHide={() => setDeleteTargetScreenshot(null)}
+        transition={false}
+        centered
+      >
+        <Modal.Header closeButton className="bg-dark border-danger">
+          <Modal.Title className="fs-6 d-flex align-items-center gap-2 text-danger">
+            <AlertTriangle size={18} />
+            <span>Confirm Screenshot Deletion</span>
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="bg-dark text-light small">
+          <p className="mb-2">
+            Are you sure you want to permanently delete this attached screenshot?
+          </p>
+          {deleteTargetScreenshot && (
+            <div className="p-2 px-3 mb-2 soc-subbox d-flex align-items-center gap-3">
+              {deleteTargetScreenshot.image_url && (
+                <img
+                  src={deleteTargetScreenshot.image_url}
+                  alt={deleteTargetScreenshot.caption || deleteTargetScreenshot.filename}
+                  className="screenshot-thumb"
+                  style={{ cursor: 'default' }}
+                />
+              )}
+              <div className="text-break">
+                <div className="text-white fw-semibold">
+                  {deleteTargetScreenshot.caption || 'No caption'}
+                </div>
+                {deleteTargetScreenshot.filename && (
+                  <div className="mono-text text-secondary" style={{ fontSize: '0.75rem' }}>
+                    {deleteTargetScreenshot.filename}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <p className="text-secondary mb-0">
+            This will permanently remove the screenshot file from the investigation. This action
+            cannot be undone.
+          </p>
+        </Modal.Body>
+        <Modal.Footer className="bg-dark border-secondary">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setDeleteTargetScreenshot(null)}
+          >
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={handleConfirmDeleteScreenshot}>
+            Delete Screenshot
           </Button>
         </Modal.Footer>
       </Modal>

@@ -891,3 +891,69 @@ class IncidentReporterTests(TestCase):
         # Super Admin CAN delete timeline items created by another user
         self.client.force_authenticate(user=self.super_admin)
         self.assertEqual(self.client.delete(f"/api/evidence/{item_c['id']}/").status_code, 204)
+
+    def test_screenshot_deletion_restricted_to_creator_admin_or_super_admin(self):
+        analyst_two = create_user_with_role(
+            "analyst2_shots", "Str0ngAnalyst2Pass!99", UserProfile.ROLE_ANALYST,
+            first_name="Amos", last_name="Burton",
+        )
+
+        def make_png_upload(name: str) -> SimpleUploadedFile:
+            buf = io.BytesIO()
+            PilImage.new("RGB", (16, 16), color=(12, 34, 56)).save(buf, format="PNG")
+            return SimpleUploadedFile(name, buf.getvalue(), content_type="image/png")
+
+        # Analyst 1 creates an investigation, an evidence item, and 3 screenshots
+        self.client.force_authenticate(user=self.analyst_user)
+        proj_id = self.client.post(
+            "/api/projects/",
+            {"title": "Screenshot Ownership Case", "customer_id": "CUST-77"},
+            format="json",
+        ).json()["id"]
+
+        ev_res = self.client.post(
+            "/api/evidence/",
+            {
+                "project": proj_id,
+                "summary": "Event with attached screenshots",
+                "screenshots_upload": [
+                    make_png_upload("shot_creator.png"),
+                    make_png_upload("shot_admin.png"),
+                    make_png_upload("shot_super.png"),
+                ],
+                "screenshot_captions": ["Creator Shot", "Admin Shot", "Super Shot"],
+            },
+            format="multipart",
+        )
+        self.assertEqual(ev_res.status_code, 201)
+        shots = ev_res.json()["screenshots"]
+        self.assertEqual(len(shots), 3)
+        shot_a, shot_b, shot_c = shots
+        self.assertEqual(shot_a["created_by"], self.analyst_user.id)
+        self.assertEqual(shot_a["created_by_username"], "analyst1")
+        self.assertTrue(shot_a["can_actor_delete"])
+
+        # Analyst 2 (did NOT upload these screenshots) sees can_actor_delete=False and CANNOT delete (403)
+        self.client.force_authenticate(user=analyst_two)
+        proj_detail_a2 = self.client.get(f"/api/projects/{proj_id}/").json()
+        for sh in proj_detail_a2["timeline_evidence"][0]["screenshots"]:
+            self.assertFalse(sh["can_actor_delete"])
+        self.assertEqual(self.client.delete(f"/api/screenshots/{shot_a['id']}/").status_code, 403)
+
+        # Executive also CANNOT delete screenshots
+        self.client.force_authenticate(user=self.exec_user)
+        self.assertEqual(self.client.delete(f"/api/screenshots/{shot_a['id']}/").status_code, 403)
+
+        # Uploader (Analyst 1) CAN delete their own screenshot
+        self.client.force_authenticate(user=self.analyst_user)
+        self.assertEqual(self.client.delete(f"/api/screenshots/{shot_a['id']}/").status_code, 204)
+
+        # Admin CAN delete screenshots uploaded by another user
+        self.client.force_authenticate(user=self.admin_user)
+        proj_detail_admin = self.client.get(f"/api/projects/{proj_id}/").json()
+        self.assertTrue(proj_detail_admin["timeline_evidence"][0]["screenshots"][0]["can_actor_delete"])
+        self.assertEqual(self.client.delete(f"/api/screenshots/{shot_b['id']}/").status_code, 204)
+
+        # Super Admin CAN delete screenshots uploaded by another user
+        self.client.force_authenticate(user=self.super_admin)
+        self.assertEqual(self.client.delete(f"/api/screenshots/{shot_c['id']}/").status_code, 204)

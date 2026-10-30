@@ -23,6 +23,7 @@ from .permissions import (
     InvestigationItemPermission,
     assert_project_unlocked,
     assert_can_delete_evidence_item,
+    assert_can_delete_screenshot,
 )
 from .serializers import (
     ProjectSerializer,
@@ -189,7 +190,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 class EvidenceItemViewSet(viewsets.ModelViewSet):
     queryset = (
         EvidenceItem.objects.select_related('project', 'created_by')
-        .prefetch_related('screenshots')
+        .prefetch_related('screenshots__created_by')
         .all()
     )
     serializer_class = EvidenceItemSerializer
@@ -219,6 +220,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
                 image=img_file,
                 caption=caption,
                 analyst_name=instance.analyst_name,
+                created_by=self.request.user,
             )
         instance.project.sync_archive_manifest()
 
@@ -236,6 +238,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
                 image=img_file,
                 caption=caption,
                 analyst_name=instance.analyst_name,
+                created_by=self.request.user,
             )
         instance.project.sync_archive_manifest()
 
@@ -359,7 +362,11 @@ class ExternalResearchViewSet(viewsets.ModelViewSet):
 
 
 class EvidenceScreenshotViewSet(viewsets.ModelViewSet):
-    queryset = EvidenceScreenshot.objects.select_related('evidence__project').all()
+    queryset = EvidenceScreenshot.objects.select_related(
+        'created_by',
+        'evidence__created_by',
+        'evidence__project',
+    ).all()
     serializer_class = EvidenceScreenshotSerializer
     permission_classes = [InvestigationItemPermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -370,7 +377,7 @@ class EvidenceScreenshotViewSet(viewsets.ModelViewSet):
         analyst = (serializer.validated_data.get('analyst_name') or '').strip()
         if not analyst:
             analyst = get_user_display_name(self.request.user)
-        instance = serializer.save(analyst_name=analyst)
+        instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
         instance.evidence.project.sync_archive_manifest()
 
     def perform_update(self, serializer):
@@ -383,6 +390,7 @@ class EvidenceScreenshotViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         project = instance.evidence.project
         assert_project_unlocked(project)
+        assert_can_delete_screenshot(self.request.user, instance)
         instance.delete()
         project.sync_archive_manifest()
 

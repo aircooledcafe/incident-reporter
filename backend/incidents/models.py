@@ -343,7 +343,7 @@ class Project(models.Model):
         """
         return (
             self.evidence_items.select_related('created_by')
-            .prefetch_related('screenshots')
+            .prefetch_related('screenshots__created_by')
             .order_by(
                 models.F('timestamp').asc(nulls_last=True),
                 'created_at',
@@ -481,6 +481,13 @@ class EvidenceScreenshot(models.Model):
     image = models.FileField(upload_to=screenshot_upload_path)
     caption = models.CharField(max_length=512, blank=True, default="")
     analyst_name = models.CharField(max_length=150, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_evidence_screenshots',
+    )
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -161,6 +161,33 @@ def assert_can_delete_evidence_item(user, item) -> None:
         )
 
 
+def can_user_delete_screenshot(user, screenshot) -> bool:
+    """
+    Attached screenshots can only be deleted (on an unlocked investigation) by the user
+    who uploaded/created the screenshot (falling back to the parent evidence creator for
+    pre-migration items) or by an Admin / Super Admin.
+    """
+    if not user or not user.is_authenticated or not user.is_active:
+        return False
+    evidence = getattr(screenshot, 'evidence', None)
+    project = getattr(evidence, 'project', None) if evidence else None
+    if project and project.is_locked:
+        return False
+    if is_admin_or_super(user):
+        return True
+    if not can_write_investigations(user):
+        return False
+    owner_id = screenshot.created_by_id or (evidence.created_by_id if evidence else None)
+    return bool(owner_id and owner_id == user.pk)
+
+
+def assert_can_delete_screenshot(user, screenshot) -> None:
+    if not can_user_delete_screenshot(user, screenshot):
+        raise PermissionDenied(
+            "Only the user who uploaded this screenshot, an Admin, or a Super Admin can delete it."
+        )
+
+
 class ProjectAccessPermission(permissions.BasePermission):
     """
     - demo_scenarios / seed_demo: SUPER_ADMIN only.

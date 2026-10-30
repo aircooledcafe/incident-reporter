@@ -23,6 +23,7 @@ from .permissions import (
     build_user_permissions_summary,
     can_actor_modify_user,
     can_user_delete_evidence_item,
+    can_user_delete_screenshot,
     validate_user_management_action,
 )
 from .reports import collect_mitre_summary
@@ -295,6 +296,8 @@ class ManagedUserSerializer(serializers.ModelSerializer):
 class EvidenceScreenshotSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
     filename = serializers.SerializerMethodField()
+    created_by_username = serializers.SerializerMethodField()
+    can_actor_delete = serializers.SerializerMethodField()
 
     class Meta:
         model = EvidenceScreenshot
@@ -306,9 +309,20 @@ class EvidenceScreenshotSerializer(serializers.ModelSerializer):
             'filename',
             'caption',
             'analyst_name',
+            'created_by',
+            'created_by_username',
+            'can_actor_delete',
             'uploaded_at',
         ]
-        read_only_fields = ['id', 'uploaded_at', 'image_url', 'filename']
+        read_only_fields = [
+            'id',
+            'created_by',
+            'created_by_username',
+            'can_actor_delete',
+            'uploaded_at',
+            'image_url',
+            'filename',
+        ]
 
     def get_image_url(self, obj):
         if not obj.image:
@@ -319,6 +333,17 @@ class EvidenceScreenshotSerializer(serializers.ModelSerializer):
         if not obj.image:
             return ""
         return os.path.basename(obj.image.name)
+
+    def get_created_by_username(self, obj) -> str:
+        if obj.created_by_id and obj.created_by:
+            return obj.created_by.username
+        return ""
+
+    def get_can_actor_delete(self, obj) -> bool:
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        return can_user_delete_screenshot(request.user, obj)
 
 
 class EvidenceItemSerializer(serializers.ModelSerializer):

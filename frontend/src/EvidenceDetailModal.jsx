@@ -17,6 +17,7 @@ export default function EvidenceDetailModal({
   defangText,
   canModifyActiveProject,
   canDeleteItem,
+  canDeleteScreenshot,
   onToggleKey,
   onEdit,
   onDelete,
@@ -288,11 +289,11 @@ export default function EvidenceDetailModal({
                   <div className="small text-truncate" title={shot.caption || shot.filename}>
                     {shot.caption || shot.filename}
                   </div>
-                  {canModifyActiveProject && (
+                  {canDeleteScreenshot && canDeleteScreenshot(shot) && (
                     <Button
                       variant="outline-danger"
                       size="sm"
-                      onClick={() => onDeleteScreenshot(shot.id)}
+                      onClick={() => onDeleteScreenshot(shot)}
                     >
                       <Trash2 size={12} className="me-1" />
                       Remove
