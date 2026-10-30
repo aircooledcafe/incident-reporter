@@ -16,6 +16,10 @@ if [ -z "${DJANGO_SECRET_KEY}" ]; then
   exit 1
 fi
 
+echo "Applying Django migrations & checking optional initial Super Admin..."
+"$ROOT_DIR/backend/.venv/bin/python" "$ROOT_DIR/backend/manage.py" migrate --noinput
+"$ROOT_DIR/backend/.venv/bin/python" "$ROOT_DIR/backend/manage.py" ensure_superuser
+
 echo "Starting Django 5.1.14 backend on http://0.0.0.0:8000 ..."
 "$ROOT_DIR/backend/.venv/bin/python" "$ROOT_DIR/backend/manage.py" runserver 0.0.0.0:8000 &
 BACKEND_PID=$!

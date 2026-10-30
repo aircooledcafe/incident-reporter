@@ -9,16 +9,32 @@ services:
       DJANGO_DEBUG: "${DJANGO_DEBUG:-False}"
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY must be set in .env or environment}"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
-      DJANGO_DB_PATH: "/data/db/db.sqlite3"
-      DJANGO_ARTIFACTS_ROOT: "/data/artifacts"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-}"
+      DJANGO_DB_PATH: "${CONTAINER_DB_PATH:-/data/db/db.sqlite3}"
+      DJANGO_ARTIFACTS_ROOT: "${CONTAINER_ARTIFACTS_ROOT:-/data/artifacts}"
+      DJANGO_SUPERUSER_USERNAME: "${DJANGO_SUPERUSER_USERNAME:-}"
+      DJANGO_SUPERUSER_PASSWORD: "${DJANGO_SUPERUSER_PASSWORD:-}"
+      DJANGO_SUPERUSER_EMAIL: "${DJANGO_SUPERUSER_EMAIL:-}"
       GUNICORN_WORKERS: "${GUNICORN_WORKERS:-3}"
     volumes:
-      # Mapped host storage for SQLite database (persists across rebuilds, migrations, and updates)
-      - ./data/db:/data/db
-      # Mapped host storage for investigation project folders, screenshots, and generated reports
-      - ./artifacts:/data/artifacts
+      # External/host persistence for SQLite database (auth_user, roles, sessions, API tokens, projects, evidence)
+      - "${HOST_DB_DIR:-./data/db}:/data/db"
+      # External/host persistence for investigation folders, uploaded screenshots, manifests, and exported reports
+      - "${HOST_ARTIFACTS_DIR:-./artifacts}:/data/artifacts"
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/auth/status/', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build:
@@ -27,6 +43,7 @@ services:
     container_name: incident-reporter-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "${APP_PORT:-5173}:80"

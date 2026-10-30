@@ -27,6 +27,15 @@ import {
   X,
   AlertTriangle,
   ChevronDown,
+  Lock,
+  Unlock,
+  Shield,
+  Users,
+  KeyRound,
+  LogOut,
+  Database,
+  UserPlus,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from './api';
 
@@ -35,6 +44,20 @@ const STATUS_LABELS = {
   INVESTIGATING: 'Investigating',
   CONTAINED: 'Contained',
   ARCHIVED: 'Archived / Closed',
+};
+
+const ROLE_LABELS = {
+  SUPER_ADMIN: 'Super Admin',
+  ADMIN: 'Admin',
+  ANALYST: 'Analyst',
+  EXECUTIVE: 'Executive',
+};
+
+const ROLE_BADGE_BG = {
+  SUPER_ADMIN: 'danger',
+  ADMIN: 'primary',
+  ANALYST: 'info',
+  EXECUTIVE: 'secondary',
 };
 
 const EMPTY_PROJECT_FORM = {
@@ -71,6 +94,16 @@ const EMPTY_EVIDENCE_FORM = {
   search_query_link: '',
   notes: '',
   is_key_evidence: false,
+};
+
+const EMPTY_USER_FORM = {
+  username: '',
+  first_name: '',
+  last_name: '',
+  email: '',
+  role: 'ANALYST',
+  password: '',
+  is_active: true,
 };
 
 /**
@@ -153,21 +186,45 @@ function formatUtcTimestamp(isoString) {
 }
 
 export default function App() {
+  // Authentication & Navigation State
+  const [authChecking, setAuthChecking] = useState(true);
+  const [needsInitialSetup, setNeedsInitialSetup] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authError, setAuthError] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // Login & Initial Setup forms
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [setupForm, setSetupForm] = useState({
+    username: '',
+    first_name: '',
+    last_name: '',
+    email: '',
+    password: '',
+    confirm_password: '',
+  });
+
+  // Main section switcher ('investigations' | 'users')
+  const [mainView, setMainView] = useState('investigations');
+
+  // Investigation Data State
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [activeProject, setActiveProject] = useState(null);
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'timeline' | 'reports'
-  const [currentAnalyst, setCurrentAnalyst] = useState('Chrisjen Avasarala');
+  const [analystDirectory, setAnalystDirectory] = useState([]);
 
   // Sidebar Archived/Closed filter (hidden by default)
   const [showArchivedSidebar, setShowArchivedSidebar] = useState(false);
 
-  // Header status picker & Archive warning modal state
+  // Header status picker, Archive warning, & Project delete confirmation modal state
   const [showHeaderStatusPicker, setShowHeaderStatusPicker] = useState(false);
   const [showArchiveWarningModal, setShowArchiveWarningModal] = useState(false);
   const [pendingArchiveAction, setPendingArchiveAction] = useState(null);
+  const [showDeleteProjectModal, setShowDeleteProjectModal] = useState(false);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -195,21 +252,82 @@ export default function App() {
   const [filterType, setFilterType] = useState('ALL');
   const [searchFilter, setSearchFilter] = useState('');
 
+  // User Management State (Admin / Super Admin)
+  const [managedUsers, setManagedUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUserObj, setEditingUserObj] = useState(null);
+  const [userForm, setUserForm] = useState(EMPTY_USER_FORM);
+
+  // Password Reset Modal (Admin / Super Admin resetting lesser/other user)
+  const [resetTargetUser, setResetTargetUser] = useState(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+
+  // Delete User Confirmation Modal
+  const [deleteTargetUser, setDeleteTargetUser] = useState(null);
+
+  // Self Account / Password / API Token Modal
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [ownPasswordForm, setOwnPasswordForm] = useState({
+    current_password: '',
+    new_password: '',
+    confirm_password: '',
+  });
+  const [apiTokenValue, setApiTokenValue] = useState('');
+  const [apiTokenLoading, setApiTokenLoading] = useState(false);
+
+  // Derived permissions & lock state
+  const perms = authUser?.permissions || {};
+  const canEditRole = Boolean(perms.can_edit);
+  const canLockProjects = Boolean(perms.can_lock_projects);
+  const canDeleteProjects = Boolean(perms.can_delete_projects);
+  const canManageUsers = Boolean(perms.can_manage_users);
+  const canManageAdmins = Boolean(perms.can_manage_admins);
+  const canAccessDbAdmin = Boolean(perms.can_access_db_admin);
+
+  const isProjectLocked = Boolean(activeProject?.is_locked);
+  const canModifyActiveProject = canEditRole && !isProjectLocked;
+  const currentAnalystName = authUser?.display_name || authUser?.username || '';
+
   const notifySuccess = useEventCallback((msg) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(''), 3500);
   });
 
-  const loadProjects = useEventCallback(async (selectId = null) => {
+  const handleApiError = useEventCallback((err, prefix) => {
+    if (err && err.status === 401) {
+      setAuthUser(null);
+      setAuthError('Your session has expired. Please sign in again.');
+      return;
+    }
+    setErrorMsg(`${prefix}: ${err.message}`);
+  });
+
+  const loadAnalystDirectory = useEventCallback(async () => {
+    try {
+      const list = await api.listAnalysts();
+      setAnalystDirectory(list || []);
+    } catch {
+      // Non-critical autocomplete helper
+    }
+  });
+
+  const loadProjects = useEventCallback(async (selectId = null, clearSelection = false) => {
     try {
       setLoading(true);
       const list = await api.listProjects();
       setProjects(list);
       const nonArchived = list.filter((p) => p.status !== 'ARCHIVED');
       const defaultFirst = nonArchived[0] || list[0];
-      const targetId = selectId || selectedProjectId || (defaultFirst && defaultFirst.id);
-      if (targetId) {
-        const detail = await api.getProject(targetId);
+      const candidateId = clearSelection
+        ? selectId || (defaultFirst && defaultFirst.id)
+        : selectId || selectedProjectId || (defaultFirst && defaultFirst.id);
+
+      const existsInList = candidateId && list.some((p) => p.id === candidateId);
+      const finalTargetId = existsInList ? candidateId : defaultFirst && defaultFirst.id;
+
+      if (finalTargetId) {
+        const detail = await api.getProject(finalTargetId);
         setSelectedProjectId(detail.id);
         setActiveProject(detail);
       } else {
@@ -217,16 +335,263 @@ export default function App() {
         setActiveProject(null);
       }
     } catch (err) {
-      setErrorMsg(`Failed to load incident projects: ${err.message}`);
+      handleApiError(err, 'Failed to load incident projects');
     } finally {
       setLoading(false);
     }
   });
 
-  useEffect(() => {
-    loadProjects();
-  }, [loadProjects]);
+  const loadManagedUsers = useEventCallback(async () => {
+    if (!canManageUsers) return;
+    try {
+      setUsersLoading(true);
+      const list = await api.listUsers();
+      setManagedUsers(list);
+    } catch (err) {
+      handleApiError(err, 'Failed to load user accounts');
+    } finally {
+      setUsersLoading(false);
+    }
+  });
 
+  const initializeSession = useEventCallback(async () => {
+    try {
+      setAuthChecking(true);
+      const statusData = await api.getAuthStatus();
+      setNeedsInitialSetup(Boolean(statusData.needs_initial_setup));
+      if (statusData.authenticated && statusData.user) {
+        setAuthUser(statusData.user);
+      } else {
+        setAuthUser(null);
+      }
+    } catch (err) {
+      setAuthError(`Unable to reach backend authentication service: ${err.message}`);
+    } finally {
+      setAuthChecking(false);
+    }
+  });
+
+  useEffect(() => {
+    initializeSession();
+  }, [initializeSession]);
+
+  useEffect(() => {
+    if (authUser) {
+      loadProjects(null, true);
+      loadAnalystDirectory();
+    } else {
+      setProjects([]);
+      setSelectedProjectId(null);
+      setActiveProject(null);
+      setManagedUsers([]);
+      setMainView('investigations');
+    }
+  }, [authUser, loadProjects, loadAnalystDirectory]);
+
+  useEffect(() => {
+    if (authUser && mainView === 'users' && canManageUsers) {
+      loadManagedUsers();
+    }
+  }, [authUser, mainView, canManageUsers, loadManagedUsers]);
+
+  // --- Auth Handlers ---
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSubmitting(true);
+    try {
+      const res = await api.login(loginUsername.trim(), loginPassword);
+      setLoginPassword('');
+      setAuthUser(res.user);
+      setNeedsInitialSetup(false);
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleInitialSetupSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    if (setupForm.password !== setupForm.confirm_password) {
+      setAuthError('Passwords do not match.');
+      return;
+    }
+    setAuthSubmitting(true);
+    try {
+      const res = await api.initialSetup({
+        username: setupForm.username.trim(),
+        first_name: setupForm.first_name.trim(),
+        last_name: setupForm.last_name.trim(),
+        email: setupForm.email.trim(),
+        password: setupForm.password,
+      });
+      setSetupForm({
+        username: '',
+        first_name: '',
+        last_name: '',
+        email: '',
+        password: '',
+        confirm_password: '',
+      });
+      setNeedsInitialSetup(false);
+      setAuthUser(res.user);
+      notifySuccess('Initial Super Admin account created.');
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+    } catch {
+      // Clear local session regardless
+    }
+    setAuthUser(null);
+    setErrorMsg('');
+    setSuccessMsg('');
+    const statusData = await api.getAuthStatus().catch(() => null);
+    if (statusData) {
+      setNeedsInitialSetup(Boolean(statusData.needs_initial_setup));
+    }
+  };
+
+  const openAccountSettings = async () => {
+    setOwnPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+    setShowAccountModal(true);
+    if (canEditRole) {
+      try {
+        setApiTokenLoading(true);
+        const res = await api.getApiToken();
+        setApiTokenValue(res.token || '');
+      } catch {
+        setApiTokenValue('');
+      } finally {
+        setApiTokenLoading(false);
+      }
+    }
+  };
+
+  const handleRotateApiToken = async () => {
+    try {
+      setApiTokenLoading(true);
+      const res = await api.rotateApiToken();
+      setApiTokenValue(res.token || '');
+      notifySuccess('SOC ingestion API token rotated.');
+    } catch (err) {
+      handleApiError(err, 'Failed to rotate API token');
+    } finally {
+      setApiTokenLoading(false);
+    }
+  };
+
+  const handleChangeOwnPassword = async (e) => {
+    e.preventDefault();
+    if (ownPasswordForm.new_password !== ownPasswordForm.confirm_password) {
+      setErrorMsg('New password and confirmation do not match.');
+      return;
+    }
+    try {
+      await api.changeOwnPassword({
+        current_password: ownPasswordForm.current_password,
+        new_password: ownPasswordForm.new_password,
+      });
+      setShowAccountModal(false);
+      notifySuccess('Your password has been updated.');
+    } catch (err) {
+      handleApiError(err, 'Could not change password');
+    }
+  };
+
+  // --- User Management Handlers ---
+  const openCreateUserModal = () => {
+    setEditingUserObj(null);
+    setUserForm({
+      ...EMPTY_USER_FORM,
+      role: 'ANALYST',
+    });
+    setShowUserModal(true);
+  };
+
+  const openEditUserModal = (target) => {
+    setEditingUserObj(target);
+    setUserForm({
+      username: target.username || '',
+      first_name: target.first_name || '',
+      last_name: target.last_name || '',
+      email: target.email || '',
+      role: target.role || 'ANALYST',
+      password: '',
+      is_active: Boolean(target.is_active),
+    });
+    setShowUserModal(true);
+  };
+
+  const handleSaveUser = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingUserObj) {
+        const payload = {
+          first_name: userForm.first_name.trim(),
+          last_name: userForm.last_name.trim(),
+          email: userForm.email.trim(),
+          role: userForm.role,
+          is_active: userForm.is_active,
+        };
+        await api.updateUser(editingUserObj.id, payload);
+        notifySuccess(`Updated account '${editingUserObj.username}'.`);
+      } else {
+        const payload = {
+          username: userForm.username.trim(),
+          first_name: userForm.first_name.trim(),
+          last_name: userForm.last_name.trim(),
+          email: userForm.email.trim(),
+          role: userForm.role,
+          password: userForm.password,
+          is_active: userForm.is_active,
+        };
+        const created = await api.createUser(payload);
+        notifySuccess(`Created ${ROLE_LABELS[created.role] || created.role} user '${created.username}'.`);
+      }
+      setShowUserModal(false);
+      await loadManagedUsers();
+      await loadAnalystDirectory();
+    } catch (err) {
+      handleApiError(err, 'Failed to save user');
+    }
+  };
+
+  const handleConfirmPasswordReset = async (e) => {
+    e.preventDefault();
+    if (!resetTargetUser) return;
+    try {
+      await api.resetUserPassword(resetTargetUser.id, resetNewPassword);
+      notifySuccess(`Password reset completed for '${resetTargetUser.username}'.`);
+      setResetTargetUser(null);
+      setResetNewPassword('');
+    } catch (err) {
+      handleApiError(err, 'Password reset failed');
+    }
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteTargetUser) return;
+    try {
+      await api.deleteUser(deleteTargetUser.id);
+      notifySuccess(`Deleted user '${deleteTargetUser.username}'.`);
+      setDeleteTargetUser(null);
+      await loadManagedUsers();
+      await loadAnalystDirectory();
+    } catch (err) {
+      handleApiError(err, 'Failed to delete user');
+    }
+  };
+
+  // --- Investigation Handlers ---
   const handleSelectProject = useEventCallback(async (id) => {
     try {
       setLoading(true);
@@ -235,7 +600,7 @@ export default function App() {
       setSelectedProjectId(detail.id);
       setActiveProject(detail);
     } catch (err) {
-      setErrorMsg(`Could not load project #${id}: ${err.message}`);
+      handleApiError(err, `Could not load project #${id}`);
     } finally {
       setLoading(false);
     }
@@ -248,11 +613,43 @@ export default function App() {
       await loadProjects(created.id);
       notifySuccess('Demo incident loaded (20 total events, 7 Key Evidence events).');
     } catch (err) {
-      setErrorMsg(`Failed to load sample project: ${err.message}`);
+      handleApiError(err, 'Failed to load sample project');
     } finally {
       setLoading(false);
     }
   });
+
+  const handleToggleProjectLock = async () => {
+    if (!activeProject || !canLockProjects) return;
+    try {
+      const updated = activeProject.is_locked
+        ? await api.unlockProject(activeProject.id)
+        : await api.lockProject(activeProject.id);
+      setActiveProject(updated);
+      await loadProjects(updated.id);
+      notifySuccess(
+        updated.is_locked
+          ? 'Project locked (now read-only for all users).'
+          : 'Project unlocked (editing restored).',
+      );
+    } catch (err) {
+      handleApiError(err, 'Failed to change project lock state');
+    }
+  };
+
+  const handleConfirmDeleteProject = async () => {
+    if (!activeProject || !canDeleteProjects) return;
+    try {
+      const deletedTitle = activeProject.title || `#${activeProject.id}`;
+      await api.deleteProject(activeProject.id);
+      setShowDeleteProjectModal(false);
+      await loadProjects(null, true);
+      notifySuccess(`Deleted project "${deletedTitle}".`);
+    } catch (err) {
+      setShowDeleteProjectModal(false);
+      handleApiError(err, 'Failed to delete project');
+    }
+  };
 
   const applyStatusUpdate = async (newStatus) => {
     if (!activeProject) return;
@@ -263,7 +660,7 @@ export default function App() {
       setShowHeaderStatusPicker(false);
       notifySuccess(`Project status updated to ${STATUS_LABELS[newStatus] || newStatus}.`);
     } catch (err) {
-      setErrorMsg(`Failed to update status: ${err.message}`);
+      handleApiError(err, 'Failed to update status');
     }
   };
 
@@ -282,7 +679,7 @@ export default function App() {
     setEditingProject(false);
     setProjectForm({
       ...EMPTY_PROJECT_FORM,
-      lead_analyst: currentAnalyst,
+      lead_analyst: currentAnalystName,
     });
     setShowProjectModal(true);
   };
@@ -303,7 +700,7 @@ export default function App() {
       external_research_link: '',
       external_research_summary: '',
       status: activeProject.status || 'INVESTIGATING',
-      lead_analyst: activeProject.lead_analyst || currentAnalyst,
+      lead_analyst: activeProject.lead_analyst || currentAnalystName,
     });
     setShowProjectModal(true);
   };
@@ -322,7 +719,7 @@ export default function App() {
       }
       setShowProjectModal(false);
     } catch (err) {
-      setErrorMsg(`Failed to save project: ${err.message}`);
+      handleApiError(err, 'Failed to save project');
     }
   };
 
@@ -353,7 +750,7 @@ export default function App() {
     setEvidenceForm({
       ...EMPTY_EVIDENCE_FORM,
       evidence_type: defaultType,
-      analyst_name: currentAnalyst,
+      analyst_name: currentAnalystName,
       timestamp: nowIso,
     });
     setScreenshotFiles([]);
@@ -365,7 +762,7 @@ export default function App() {
     setEditingEvidenceId(item.id);
     setEvidenceForm({
       evidence_type: item.evidence_type || 'ATOMIC',
-      analyst_name: item.analyst_name || currentAnalyst,
+      analyst_name: item.analyst_name || currentAnalystName,
       timestamp: toLocalDatetimeInput(item.timestamp),
       end_timestamp: toLocalDatetimeInput(item.end_timestamp),
       summary: item.summary || '',
@@ -394,7 +791,7 @@ export default function App() {
       const formData = new FormData();
       formData.append('project', activeProject.id);
       formData.append('evidence_type', evidenceForm.evidence_type);
-      formData.append('analyst_name', evidenceForm.analyst_name || currentAnalyst);
+      formData.append('analyst_name', evidenceForm.analyst_name || currentAnalystName);
 
       const startIso = fromDatetimeInputToIso(evidenceForm.timestamp);
       if (startIso) {
@@ -437,33 +834,33 @@ export default function App() {
       setShowEvidenceModal(false);
       await handleSelectProject(activeProject.id);
     } catch (err) {
-      setErrorMsg(`Failed to save evidence: ${err.message}`);
+      handleApiError(err, 'Failed to save evidence');
     }
   };
 
   const handleToggleKeyEvidence = async (itemId) => {
-    if (!activeProject) return;
+    if (!activeProject || !canModifyActiveProject) return;
     try {
       await api.toggleKeyEvidence(itemId);
       await handleSelectProject(activeProject.id);
     } catch (err) {
-      setErrorMsg(`Could not toggle key evidence flag: ${err.message}`);
+      handleApiError(err, 'Could not toggle key evidence flag');
     }
   };
 
   const handleDeleteEvidence = async (itemId) => {
-    if (!activeProject) return;
+    if (!activeProject || !canModifyActiveProject) return;
     try {
       await api.deleteEvidence(itemId);
       await handleSelectProject(activeProject.id);
       notifySuccess('Evidence item deleted.');
     } catch (err) {
-      setErrorMsg(`Failed to delete evidence: ${err.message}`);
+      handleApiError(err, 'Failed to delete evidence');
     }
   };
 
   const handleDeleteScreenshot = async (screenshotId) => {
-    if (!activeProject) return;
+    if (!activeProject || !canModifyActiveProject) return;
     try {
       await api.deleteScreenshot(screenshotId);
       if (previewScreenshot && previewScreenshot.id === screenshotId) {
@@ -472,42 +869,43 @@ export default function App() {
       await handleSelectProject(activeProject.id);
       notifySuccess('Screenshot deleted from event.');
     } catch (err) {
-      setErrorMsg(`Failed to delete screenshot: ${err.message}`);
+      handleApiError(err, 'Failed to delete screenshot');
     }
   };
 
   const handleAddExternalResearch = async (e) => {
     e.preventDefault();
-    if (!activeProject || (!researchLink.trim() && !researchSummary.trim())) return;
+    if (!activeProject || !canModifyActiveProject) return;
+    if (!researchLink.trim() && !researchSummary.trim()) return;
     try {
       await api.addExternalResearch({
         project: activeProject.id,
         link: researchLink.trim(),
         summary: researchSummary.trim(),
-        analyst_name: currentAnalyst,
+        analyst_name: currentAnalystName,
       });
       setResearchLink('');
       setResearchSummary('');
       await handleSelectProject(activeProject.id);
       notifySuccess('External research added.');
     } catch (err) {
-      setErrorMsg(`Could not add external research: ${err.message}`);
+      handleApiError(err, 'Could not add external research');
     }
   };
 
   const handleDeleteExternalResearch = async (id) => {
-    if (!activeProject) return;
+    if (!activeProject || !canModifyActiveProject) return;
     try {
       await api.deleteExternalResearch(id);
       await handleSelectProject(activeProject.id);
       notifySuccess('External research item removed.');
     } catch (err) {
-      setErrorMsg(`Failed to delete research entry: ${err.message}`);
+      handleApiError(err, 'Failed to delete research entry');
     }
   };
 
   const handleClearLegacyInlineResearch = async () => {
-    if (!activeProject) return;
+    if (!activeProject || !canModifyActiveProject) return;
     try {
       await api.updateProject(activeProject.id, {
         external_research_link: '',
@@ -516,9 +914,169 @@ export default function App() {
       await handleSelectProject(activeProject.id);
       notifySuccess('External research item removed.');
     } catch (err) {
-      setErrorMsg(`Failed to remove research item: ${err.message}`);
+      handleApiError(err, 'Failed to remove research item');
     }
   };
+
+  // --- Initial Loading Screen ---
+  if (authChecking) {
+    return (
+      <div className="auth-wrapper">
+        <div className="text-center">
+          <Spinner animation="border" variant="info" className="mb-3" />
+          <div className="text-secondary small">Checking authentication status...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- First-Run Initial Super Admin Setup Screen ---
+  if (!authUser && needsInitialSetup) {
+    return (
+      <div className="auth-wrapper">
+        <Card className="soc-card auth-card shadow-lg">
+          <Card.Header className="soc-card-header py-3 d-flex align-items-center gap-2">
+            <Shield size={18} className="text-lb-cyan" />
+            <span>Initial Super Admin Setup</span>
+          </Card.Header>
+          <Card.Body className="p-4">
+            <p className="text-secondary small mb-3">
+              No user accounts exist in this database yet. Create the initial{' '}
+              <strong className="text-white">Super Admin</strong> account to get started.
+            </p>
+            {authError && (
+              <Alert variant="danger" transition={false} className="py-2 small">
+                {authError}
+              </Alert>
+            )}
+            <Form onSubmit={handleInitialSetupSubmit}>
+              <Form.Group className="mb-3">
+                <Form.Label className="small">Username</Form.Label>
+                <Form.Control
+                  type="text"
+                  required
+                  autoFocus
+                  value={setupForm.username}
+                  onChange={(e) => setSetupForm({ ...setupForm, username: e.target.value })}
+                />
+              </Form.Group>
+              <Row className="g-2 mb-3">
+                <Col sm={6}>
+                  <Form.Group>
+                    <Form.Label className="small">First Name</Form.Label>
+                    <Form.Control
+                      type="text"
+                      value={setupForm.first_name}
+                      onChange={(e) => setSetupForm({ ...setupForm, first_name: e.target.value })}
+                    />
+                  </Form.Group>
+                </Col>
+                <Col sm={6}>
+                  <Form.Group>
+                    <Form.Label className="small">Last Name</Form.Label>
+                    <Form.Control
+                      type="text"
+                      value={setupForm.last_name}
+                      onChange={(e) => setSetupForm({ ...setupForm, last_name: e.target.value })}
+                    />
+                  </Form.Group>
+                </Col>
+              </Row>
+              <Form.Group className="mb-3">
+                <Form.Label className="small">Email (Optional)</Form.Label>
+                <Form.Control
+                  type="email"
+                  value={setupForm.email}
+                  onChange={(e) => setSetupForm({ ...setupForm, email: e.target.value })}
+                />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label className="small">Password</Form.Label>
+                <Form.Control
+                  type="password"
+                  required
+                  value={setupForm.password}
+                  onChange={(e) => setSetupForm({ ...setupForm, password: e.target.value })}
+                />
+              </Form.Group>
+              <Form.Group className="mb-4">
+                <Form.Label className="small">Confirm Password</Form.Label>
+                <Form.Control
+                  type="password"
+                  required
+                  value={setupForm.confirm_password}
+                  onChange={(e) =>
+                    setSetupForm({ ...setupForm, confirm_password: e.target.value })
+                  }
+                />
+              </Form.Group>
+              <Button
+                type="submit"
+                className="btn-lb-primary w-100"
+                disabled={authSubmitting}
+              >
+                {authSubmitting ? 'Creating Super Admin...' : 'Create Super Admin & Sign In'}
+              </Button>
+            </Form>
+          </Card.Body>
+        </Card>
+      </div>
+    );
+  }
+
+  // --- Sign In Screen ---
+  if (!authUser) {
+    return (
+      <div className="auth-wrapper">
+        <Card className="soc-card auth-card shadow-lg">
+          <Card.Header className="soc-card-header py-3 d-flex align-items-center gap-2">
+            <Shield size={18} className="text-lb-cyan" />
+            <span>Incident Response Evidence Recorder — Sign In</span>
+          </Card.Header>
+          <Card.Body className="p-4">
+            <p className="text-secondary small mb-3">
+              Sign in with your SOC account (Super Admin, Admin, Analyst, or Executive).
+            </p>
+            {authError && (
+              <Alert variant="danger" transition={false} className="py-2 small">
+                {authError}
+              </Alert>
+            )}
+            <Form onSubmit={handleLoginSubmit}>
+              <Form.Group className="mb-3">
+                <Form.Label className="small">Username</Form.Label>
+                <Form.Control
+                  type="text"
+                  required
+                  autoFocus
+                  autoComplete="username"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                />
+              </Form.Group>
+              <Form.Group className="mb-4">
+                <Form.Label className="small">Password</Form.Label>
+                <Form.Control
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                />
+              </Form.Group>
+              <Button
+                type="submit"
+                className="btn-lb-primary w-100"
+                disabled={authSubmitting}
+              >
+                {authSubmitting ? 'Signing in...' : 'Sign In'}
+              </Button>
+            </Form>
+          </Card.Body>
+        </Card>
+      </div>
+    );
+  }
 
   // Sidebar projects filtering (hide ARCHIVED by default unless showArchivedSidebar is enabled)
   const archivedCount = projects.filter((p) => p.status === 'ARCHIVED').length;
@@ -591,41 +1149,118 @@ export default function App() {
     ? timelineItems.find((i) => i.id === editingEvidenceId)
     : null;
 
+  const analystSuggestions = Array.from(
+    new Set(
+      [
+        currentAnalystName,
+        ...analystDirectory.map((u) => u.display_name),
+        'Chrisjen Avasarala',
+        'James Holden',
+      ].filter(Boolean),
+    ),
+  );
+
+  // Roles assignable by the logged-in user inside User Management
+  const assignableRoles = canManageAdmins
+    ? [
+        ['SUPER_ADMIN', 'Super Admin (Full System & Admin Management)'],
+        ['ADMIN', 'Admin (User & Project Administration)'],
+        ['ANALYST', 'Analyst (Create & Modify Investigations)'],
+        ['EXECUTIVE', 'Executive (Read-Only & Report Export)'],
+      ]
+    : [
+        ['ANALYST', 'Analyst (Create & Modify Investigations)'],
+        ['EXECUTIVE', 'Executive (Read-Only & Report Export)'],
+      ];
+
   return (
     <div className="min-vh-100 d-flex flex-column">
       {/* Datalist for Analyst suggestions */}
       <datalist id="soc-analysts-list">
-        <option value="Chrisjen Avasarala" />
-        <option value="James Holden" />
+        {analystSuggestions.map((name) => (
+          <option key={name} value={name} />
+        ))}
       </datalist>
 
       {/* Top Navigation Bar */}
       <Navbar className="soc-navbar py-2 px-3" variant="dark" expand="lg">
         <Container fluid>
-          <Navbar.Brand className="fw-semibold text-white">
-            Incident Response Evidence Recorder
-          </Navbar.Brand>
+          <div className="d-flex align-items-center gap-3 flex-wrap">
+            <Navbar.Brand className="fw-semibold text-white me-1">
+              Incident Response Evidence Recorder
+            </Navbar.Brand>
 
-          <div className="d-flex align-items-center gap-2 ms-auto">
-            <InputGroup size="sm" style={{ width: '280px' }}>
-              <InputGroup.Text className="bg-dark text-secondary border-secondary">
-                Analyst
-              </InputGroup.Text>
-              <Form.Control
-                type="text"
-                list="soc-analysts-list"
-                value={currentAnalyst}
-                onChange={(e) => setCurrentAnalyst(e.target.value)}
-                placeholder="Chrisjen Avasarala / James Holden"
-                className="bg-dark text-light border-secondary"
-              />
-            </InputGroup>
-            <Button className="btn-lb-cyan" size="sm" onClick={handleSeedDemo}>
-              Load Sample Incident
+            {canManageUsers && (
+              <div className="d-flex align-items-center gap-1">
+                <Button
+                  size="sm"
+                  className={mainView === 'investigations' ? 'btn-lb-primary' : ''}
+                  variant={mainView === 'investigations' ? undefined : 'outline-secondary'}
+                  onClick={() => setMainView('investigations')}
+                >
+                  Investigations
+                </Button>
+                <Button
+                  size="sm"
+                  className={mainView === 'users' ? 'btn-lb-primary' : ''}
+                  variant={mainView === 'users' ? undefined : 'outline-secondary'}
+                  onClick={() => setMainView('users')}
+                >
+                  <Users size={14} className="me-1" />
+                  Users
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="d-flex align-items-center flex-wrap gap-2 ms-auto mt-2 mt-lg-0">
+            {mainView === 'investigations' && canEditRole && (
+              <>
+                <Button className="btn-lb-cyan" size="sm" onClick={handleSeedDemo}>
+                  Load Sample Incident
+                </Button>
+                <Button className="btn-lb-primary" size="sm" onClick={openNewProjectModal}>
+                  <Plus size={15} className="me-1" />
+                  New Project
+                </Button>
+              </>
+            )}
+
+            {canAccessDbAdmin && (
+              <Button
+                as="a"
+                href="/admin/"
+                target="_blank"
+                rel="noreferrer"
+                variant="outline-secondary"
+                size="sm"
+                title="Open Django Raw Database Admin (Super Admin Only)"
+              >
+                <Database size={14} className="me-1" />
+                DB Admin
+              </Button>
+            )}
+
+            <div className="d-flex align-items-center gap-2 px-2 py-1 rounded soc-subbox">
+              <span className="small text-white fw-semibold">{currentAnalystName}</span>
+              <Badge bg={ROLE_BADGE_BG[authUser.role] || 'secondary'} style={{ fontSize: '0.7rem' }}>
+                {ROLE_LABELS[authUser.role] || authUser.role}
+              </Badge>
+            </div>
+
+            <Button
+              variant="outline-light"
+              size="sm"
+              onClick={openAccountSettings}
+              title="Change Password & API Token"
+            >
+              <KeyRound size={14} className="me-1" />
+              Account
             </Button>
-            <Button className="btn-lb-primary" size="sm" onClick={openNewProjectModal}>
-              <Plus size={15} className="me-1" />
-              New Project
+
+            <Button variant="outline-secondary" size="sm" onClick={handleLogout}>
+              <LogOut size={14} className="me-1" />
+              Sign Out
             </Button>
           </div>
         </Container>
@@ -655,976 +1290,1261 @@ export default function App() {
           </Alert>
         )}
 
-        <Row className="g-4">
-          {/* Left Sidebar: Projects List */}
-          <Col lg={3} xl={2}>
-            <Card className="soc-card">
-              <Card.Header className="soc-card-header py-2">
-                <div className="d-flex justify-content-between align-items-center">
-                  <span className="small text-uppercase text-secondary">
-                    Projects ({visibleSidebarProjects.length})
-                  </span>
+        {/* ==================== USER MANAGEMENT VIEW (ADMIN & SUPER ADMIN) ==================== */}
+        {mainView === 'users' && canManageUsers ? (
+          <Card className="soc-card">
+            <Card.Header className="soc-card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div>
+                <div className="fw-semibold text-white">User &amp; Role Administration</div>
+                <div className="small text-secondary fw-normal mt-1">
+                  {canManageAdmins
+                    ? 'Super Admin access: create and manage Super Admin, Admin, Analyst, and Executive users.'
+                    : 'Admin access: create and manage Analyst and Executive users, assign roles, and reset passwords for lesser users.'}
                 </div>
-                <div className="mt-2 pt-1 border-top border-secondary">
-                  <Form.Check
-                    type="switch"
-                    id="show-archived-switch"
-                    label={`Show Archived (${archivedCount})`}
-                    checked={showArchivedSidebar}
-                    onChange={(e) => setShowArchivedSidebar(e.target.checked)}
-                    className="small text-secondary"
-                  />
+              </div>
+              <Button className="btn-lb-primary" size="sm" onClick={openCreateUserModal}>
+                <UserPlus size={15} className="me-1" />
+                Create User
+              </Button>
+            </Card.Header>
+            <Card.Body className="p-0">
+              {usersLoading ? (
+                <div className="text-center py-5">
+                  <Spinner animation="border" variant="info" size="sm" />
                 </div>
-              </Card.Header>
-              <Card.Body className="p-2">
-                {loading && projects.length === 0 ? (
-                  <div className="text-center py-4">
-                    <Spinner animation="border" size="sm" variant="info" />
-                  </div>
-                ) : visibleSidebarProjects.length === 0 ? (
-                  <div className="text-center py-3 px-2 text-secondary small">
-                    <p className="mb-2">
-                      {projects.length > 0
-                        ? 'No active investigations. Toggle "Show Archived" above to view closed projects.'
-                        : 'No projects created yet.'}
-                    </p>
-                    <Button className="btn-lb-primary w-100" size="sm" onClick={openNewProjectModal}>
-                      Create Project
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="d-flex flex-column gap-2">
-                    {visibleSidebarProjects.map((p) => {
-                      const isSelected = activeProject && activeProject.id === p.id;
-                      return (
-                        <div
-                          key={p.id}
-                          onClick={() => handleSelectProject(p.id)}
-                          className={`p-2 rounded project-list-item ${
-                            isSelected ? 'active-project' : ''
-                          }`}
-                        >
-                          <div className="d-flex justify-content-between align-items-start gap-1">
-                            <div className="fw-semibold small text-white text-truncate">
-                              {p.title || `Incident #${p.id}`}
-                            </div>
-                          </div>
-                          <div className="mt-1 mb-1">
-                            <Badge
-                              bg={p.status === 'ARCHIVED' ? 'secondary' : 'dark'}
-                              className="border border-secondary text-lb-cyan fw-normal"
-                              style={{ fontSize: '0.68rem' }}
-                            >
-                              {STATUS_LABELS[p.status] || p.status}
+              ) : (
+                <Table responsive hover variant="dark" className="mb-0 align-middle">
+                  <thead className="small text-secondary text-uppercase">
+                    <tr>
+                      <th>Username</th>
+                      <th>Display Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Status</th>
+                      <th>Last Login (UTC)</th>
+                      <th className="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {managedUsers.map((u) => (
+                      <tr key={u.id}>
+                        <td className="mono-text fw-semibold text-white">
+                          {u.username}{' '}
+                          {u.is_self && (
+                            <Badge bg="secondary" className="ms-1" style={{ fontSize: '0.68rem' }}>
+                              You
                             </Badge>
-                          </div>
-                          <div className="text-secondary" style={{ fontSize: '0.75rem' }}>
-                            <div>{p.customer_name || 'No Customer'}</div>
-                            <div>
-                              {p.ticket_id || 'No Ticket'} &bull; {p.evidence_count} events ({p.key_evidence_count} key)
+                          )}
+                        </td>
+                        <td>{u.display_name || '—'}</td>
+                        <td className="text-secondary small">{u.email || '—'}</td>
+                        <td>
+                          <Badge bg={ROLE_BADGE_BG[u.role] || 'secondary'}>
+                            {u.role_display || ROLE_LABELS[u.role] || u.role}
+                          </Badge>
+                        </td>
+                        <td>
+                          {u.is_active ? (
+                            <Badge bg="success">Active</Badge>
+                          ) : (
+                            <Badge bg="secondary">Disabled</Badge>
+                          )}
+                        </td>
+                        <td className="mono-text small text-secondary">
+                          {u.last_login ? formatUtcTimestamp(u.last_login) : 'Never'}
+                        </td>
+                        <td className="text-end">
+                          {u.can_actor_modify ? (
+                            <div className="d-flex justify-content-end gap-2">
+                              <Button
+                                variant="outline-light"
+                                size="sm"
+                                onClick={() => openEditUserModal(u)}
+                              >
+                                <Edit3 size={13} className="me-1" />
+                                Edit / Role
+                              </Button>
+                              <Button
+                                className="btn-lb-cyan"
+                                size="sm"
+                                onClick={() => {
+                                  setResetTargetUser(u);
+                                  setResetNewPassword('');
+                                }}
+                              >
+                                <KeyRound size={13} className="me-1" />
+                                Reset Password
+                              </Button>
+                              {!u.is_self && (
+                                <Button
+                                  variant="outline-danger"
+                                  size="sm"
+                                  onClick={() => setDeleteTargetUser(u)}
+                                >
+                                  <Trash2 size={13} />
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="small text-secondary">Protected</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              )}
+            </Card.Body>
+          </Card>
+        ) : (
+          /* ==================== INVESTIGATIONS VIEW ==================== */
+          <Row className="g-4">
+            {/* Left Sidebar: Projects List */}
+            <Col lg={3} xl={2}>
+              <Card className="soc-card">
+                <Card.Header className="soc-card-header py-2">
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span className="small text-uppercase text-secondary">
+                      Projects ({visibleSidebarProjects.length})
+                    </span>
+                  </div>
+                  <div className="mt-2 pt-1 border-top border-secondary">
+                    <Form.Check
+                      type="switch"
+                      id="show-archived-switch"
+                      label={`Show Archived (${archivedCount})`}
+                      checked={showArchivedSidebar}
+                      onChange={(e) => setShowArchivedSidebar(e.target.checked)}
+                      className="small text-secondary"
+                    />
+                  </div>
+                </Card.Header>
+                <Card.Body className="p-2">
+                  {loading && projects.length === 0 ? (
+                    <div className="text-center py-4">
+                      <Spinner animation="border" size="sm" variant="info" />
+                    </div>
+                  ) : visibleSidebarProjects.length === 0 ? (
+                    <div className="text-center py-3 px-2 text-secondary small">
+                      <p className="mb-2">
+                        {projects.length > 0
+                          ? 'No active investigations. Toggle "Show Archived" above to view closed projects.'
+                          : 'No projects created yet.'}
+                      </p>
+                      {canEditRole && (
+                        <Button
+                          className="btn-lb-primary w-100"
+                          size="sm"
+                          onClick={openNewProjectModal}
+                        >
+                          Create Project
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="d-flex flex-column gap-2">
+                      {visibleSidebarProjects.map((p) => {
+                        const isSelected = activeProject && activeProject.id === p.id;
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => handleSelectProject(p.id)}
+                            className={`p-2 rounded project-list-item ${
+                              isSelected ? 'active-project' : ''
+                            }`}
+                          >
+                            <div className="d-flex justify-content-between align-items-start gap-1">
+                              <div className="fw-semibold small text-white text-truncate">
+                                {p.title || `Incident #${p.id}`}
+                              </div>
+                              {p.is_locked && (
+                                <Lock
+                                  size={13}
+                                  className="text-warning flex-shrink-0 mt-1"
+                                  title="Locked (Read-Only)"
+                                />
+                              )}
+                            </div>
+                            <div className="mt-1 mb-1 d-flex flex-wrap gap-1">
+                              <Badge
+                                bg={p.status === 'ARCHIVED' ? 'secondary' : 'dark'}
+                                className="border border-secondary text-lb-cyan fw-normal"
+                                style={{ fontSize: '0.68rem' }}
+                              >
+                                {STATUS_LABELS[p.status] || p.status}
+                              </Badge>
+                              {p.is_locked && (
+                                <Badge
+                                  bg="warning"
+                                  text="dark"
+                                  style={{ fontSize: '0.66rem' }}
+                                >
+                                  Locked
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-secondary" style={{ fontSize: '0.75rem' }}>
+                              <div>{p.customer_name || 'No Customer'}</div>
+                              <div>
+                                {p.ticket_id || 'No Ticket'} &bull; {p.evidence_count} events (
+                                {p.key_evidence_count} key)
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </Card.Body>
-            </Card>
-          </Col>
-
-          {/* Main Project Area */}
-          <Col lg={9} xl={10}>
-            {!activeProject ? (
-              <Card className="soc-card text-center py-5">
-                <Card.Body>
-                  <h5 className="text-white mb-2">Select or Create an Incident Project</h5>
-                  <p className="text-secondary small mb-3">
-                    Create a new incident project or load the sample incident to begin recording evidence.
-                  </p>
-                  <div className="d-flex justify-content-center gap-2">
-                    <Button className="btn-lb-primary" onClick={openNewProjectModal}>
-                      Create Project
-                    </Button>
-                    <Button className="btn-lb-cyan" onClick={handleSeedDemo}>
-                      Load Sample Incident
-                    </Button>
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </Card.Body>
               </Card>
-            ) : (
-              <>
-                {/* Project Header */}
-                <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary">
-                  <div>
-                    <h4 className="mb-1 text-white fw-semibold">
-                      {activeProject.title || `Incident #${activeProject.id}`}
-                    </h4>
-                    <div className="text-secondary small d-flex flex-wrap align-items-center gap-3">
-                      <span>Customer: {activeProject.customer_name || 'N/A'}</span>
-                      <span>Customer ID: {activeProject.customer_id || 'N/A'}</span>
-                      <span>
-                        Ticket:{' '}
-                        {activeProject.ticket_link ? (
-                          <a
-                            href={activeProject.ticket_link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-lb-cyan text-decoration-none"
-                          >
-                            {activeProject.ticket_id || activeProject.ticket_link}{' '}
-                            <ExternalLink size={12} />
-                          </a>
-                        ) : (
-                          activeProject.ticket_id || 'N/A'
+            </Col>
+
+            {/* Main Project Area */}
+            <Col lg={9} xl={10}>
+              {!activeProject ? (
+                <Card className="soc-card text-center py-5">
+                  <Card.Body>
+                    <h5 className="text-white mb-2">
+                      {canEditRole
+                        ? 'Select or Create an Incident Project'
+                        : 'Select an Incident Project'}
+                    </h5>
+                    <p className="text-secondary small mb-3">
+                      {canEditRole
+                        ? 'Create a new incident project or load the sample incident to begin recording evidence.'
+                        : 'Select an investigation from the sidebar to review evidence and export reports.'}
+                    </p>
+                    {canEditRole && (
+                      <div className="d-flex justify-content-center gap-2">
+                        <Button className="btn-lb-primary" onClick={openNewProjectModal}>
+                          Create Project
+                        </Button>
+                        <Button className="btn-lb-cyan" onClick={handleSeedDemo}>
+                          Load Sample Incident
+                        </Button>
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              ) : (
+                <>
+                  {/* Project Header */}
+                  <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary">
+                    <div>
+                      <div className="d-flex align-items-center gap-2 mb-1">
+                        <h4 className="mb-0 text-white fw-semibold">
+                          {activeProject.title || `Incident #${activeProject.id}`}
+                        </h4>
+                        {isProjectLocked && (
+                          <Badge bg="warning" text="dark" className="d-inline-flex align-items-center gap-1">
+                            <Lock size={12} />
+                            Locked (Read-Only)
+                          </Badge>
                         )}
-                      </span>
+                      </div>
+                      <div className="text-secondary small d-flex flex-wrap align-items-center gap-3">
+                        <span>Customer: {activeProject.customer_name || 'N/A'}</span>
+                        <span>Customer ID: {activeProject.customer_id || 'N/A'}</span>
+                        <span>
+                          Ticket:{' '}
+                          {activeProject.ticket_link ? (
+                            <a
+                              href={activeProject.ticket_link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-lb-cyan text-decoration-none"
+                            >
+                              {activeProject.ticket_id || activeProject.ticket_link}{' '}
+                              <ExternalLink size={12} />
+                            </a>
+                          ) : (
+                            activeProject.ticket_id || 'N/A'
+                          )}
+                        </span>
 
-                      {/* Clickable Status Picker in Header */}
-                      <div className="position-relative d-inline-block">
-                        <button
-                          type="button"
-                          onClick={() => setShowHeaderStatusPicker((prev) => !prev)}
-                          className="btn btn-sm btn-outline-light py-1 px-2 d-inline-flex align-items-center gap-1"
-                          style={{ fontSize: '0.78rem' }}
-                          title="Click to change investigation status"
-                        >
-                          <span>
-                            Status: <strong>{STATUS_LABELS[activeProject.status] || activeProject.status}</strong>
-                          </span>
-                          <ChevronDown size={13} />
-                        </button>
+                        {/* Status Picker (clickable only when user can modify unlocked project) */}
+                        {canModifyActiveProject ? (
+                          <div className="position-relative d-inline-block">
+                            <button
+                              type="button"
+                              onClick={() => setShowHeaderStatusPicker((prev) => !prev)}
+                              className="btn btn-sm btn-outline-light py-1 px-2 d-inline-flex align-items-center gap-1"
+                              style={{ fontSize: '0.78rem' }}
+                              title="Click to change investigation status"
+                            >
+                              <span>
+                                Status:{' '}
+                                <strong>
+                                  {STATUS_LABELS[activeProject.status] || activeProject.status}
+                                </strong>
+                              </span>
+                              <ChevronDown size={13} />
+                            </button>
 
-                        {showHeaderStatusPicker && (
-                          <div
-                            className="position-absolute start-0 mt-1 p-1 rounded soc-card shadow-lg"
-                            style={{ zIndex: 1050, minWidth: '190px' }}
-                          >
-                            {Object.entries(STATUS_LABELS).map(([code, label]) => (
-                              <button
-                                key={code}
-                                type="button"
-                                onClick={() => handleHeaderStatusSelect(code)}
-                                className={`btn btn-sm w-100 text-start py-1 px-2 ${
-                                  activeProject.status === code
-                                    ? 'btn-lb-primary'
-                                    : 'btn-dark bg-transparent border-0 text-light'
-                                }`}
+                            {showHeaderStatusPicker && (
+                              <div
+                                className="position-absolute start-0 mt-1 p-1 rounded soc-card shadow-lg"
+                                style={{ zIndex: 1050, minWidth: '190px' }}
                               >
-                                {label}
-                              </button>
-                            ))}
+                                {Object.entries(STATUS_LABELS).map(([code, label]) => (
+                                  <button
+                                    key={code}
+                                    type="button"
+                                    onClick={() => handleHeaderStatusSelect(code)}
+                                    className={`btn btn-sm w-100 text-start py-1 px-2 ${
+                                      activeProject.status === code
+                                        ? 'btn-lb-primary'
+                                        : 'btn-dark bg-transparent border-0 text-light'
+                                    }`}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
+                        ) : (
+                          <span>
+                            Status:{' '}
+                            <strong className="text-light">
+                              {STATUS_LABELS[activeProject.status] || activeProject.status}
+                            </strong>
+                          </span>
                         )}
                       </div>
                     </div>
-                  </div>
-                  <div className="d-flex gap-2 mt-2 mt-md-0">
-                    <Button
-                      className="btn-lb-primary"
-                      size="sm"
-                      onClick={() => openNewEvidenceModal('ATOMIC')}
-                    >
-                      <Plus size={14} className="me-1" />
-                      Add Atomic Event
-                    </Button>
-                    <Button
-                      className="btn-lb-cyan"
-                      size="sm"
-                      onClick={() => openNewEvidenceModal('SEARCH')}
-                    >
-                      <Plus size={14} className="me-1" />
-                      Add Search Result
-                    </Button>
-                    <Button variant="outline-light" size="sm" onClick={openEditProjectModal}>
-                      <Edit3 size={14} className="me-1" />
-                      Edit Project
-                    </Button>
-                  </div>
-                </div>
 
-                {/* 3-Tab Navigation */}
-                <Nav
-                  variant="tabs"
-                  className="mb-3"
-                  activeKey={activeTab}
-                  onSelect={(k) => setActiveTab(k)}
-                >
-                  <Nav.Item>
-                    <Nav.Link eventKey="overview">Project Overview</Nav.Link>
-                  </Nav.Item>
-                  <Nav.Item>
-                    <Nav.Link eventKey="timeline">
-                      Incident Evidence Timeline ({activeProject.evidence_count})
-                    </Nav.Link>
-                  </Nav.Item>
-                  <Nav.Item>
-                    <Nav.Link eventKey="reports">
-                      Incident Report Generation ({activeProject.key_evidence_count} Key)
-                    </Nav.Link>
-                  </Nav.Item>
-                </Nav>
+                    <div className="d-flex flex-wrap gap-2 mt-2 mt-md-0">
+                      {canModifyActiveProject && (
+                        <>
+                          <Button
+                            className="btn-lb-primary"
+                            size="sm"
+                            onClick={() => openNewEvidenceModal('ATOMIC')}
+                          >
+                            <Plus size={14} className="me-1" />
+                            Add Atomic Event
+                          </Button>
+                          <Button
+                            className="btn-lb-cyan"
+                            size="sm"
+                            onClick={() => openNewEvidenceModal('SEARCH')}
+                          >
+                            <Plus size={14} className="me-1" />
+                            Add Search Result
+                          </Button>
+                          <Button
+                            variant="outline-light"
+                            size="sm"
+                            onClick={openEditProjectModal}
+                          >
+                            <Edit3 size={14} className="me-1" />
+                            Edit Project
+                          </Button>
+                        </>
+                      )}
 
-                {/* TAB 1: PROJECT OVERVIEW */}
-                {activeTab === 'overview' && (
-                  <div className="d-flex flex-column gap-3">
-                    <Card className="soc-card">
-                      <Card.Header className="soc-card-header d-flex justify-content-between align-items-center">
-                        <span>Incident Overview</span>
-                        <Button variant="outline-light" size="sm" onClick={openEditProjectModal}>
-                          Edit Overview
-                        </Button>
-                      </Card.Header>
-                      <Card.Body>
-                        <Row className="mb-3 g-3">
-                          <Col md={4}>
-                            <div className="text-secondary small">Customer</div>
-                            <div className="fw-semibold">
-                              {activeProject.customer_name || 'N/A'}{' '}
-                              {activeProject.customer_id ? `(${activeProject.customer_id})` : ''}
-                            </div>
-                          </Col>
-                          <Col md={4}>
-                            <div className="text-secondary small">Ticket Link</div>
-                            <div>
-                              {activeProject.ticket_link ? (
-                                <a
-                                  href={activeProject.ticket_link}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-lb-cyan text-decoration-none"
-                                >
-                                  {activeProject.ticket_id || activeProject.ticket_link}{' '}
-                                  <ExternalLink size={12} />
-                                </a>
-                              ) : (
-                                activeProject.ticket_id || 'N/A'
-                              )}
-                            </div>
-                          </Col>
-                          <Col md={4}>
-                            <div className="text-secondary small">Archive Folder</div>
-                            <div className="mono-text small">
-                              artifacts/{activeProject.artifact_folder}/
-                            </div>
-                          </Col>
-                        </Row>
-
-                        <div className="mb-4">
-                          <div className="text-secondary small mb-1">Summary of Incident</div>
-                          <div className="p-3 soc-subbox">
-                            {activeProject.summary || 'No summary provided.'}
-                          </div>
-                        </div>
-
-                        {/* Bulleted Lists for Affected Assets (defanged), Users, and Malicious Indicators (defanged) */}
-                        <Row className="g-3">
-                          <Col md={4}>
-                            <div className="p-3 soc-subbox h-100">
-                              <div className="fw-semibold mb-2 text-lb-cyan">
-                                Key Affected Assets (Defanged)
-                              </div>
-                              {assetList.length === 0 ? (
-                                <div className="text-secondary small">None recorded</div>
-                              ) : (
-                                <ul className="bullet-list mono-text">
-                                  {assetList.map((asset, i) => (
-                                    <li key={i}>{asset}</li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          </Col>
-
-                          <Col md={4}>
-                            <div className="p-3 soc-subbox h-100">
-                              <div className="fw-semibold mb-2 text-lb-cyan">
-                                Key Affected Users
-                              </div>
-                              {userList.length === 0 ? (
-                                <div className="text-secondary small">None recorded</div>
-                              ) : (
-                                <ul className="bullet-list mono-text">
-                                  {userList.map((u, i) => (
-                                    <li key={i}>{u}</li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          </Col>
-
-                          <Col md={4}>
-                            <div className="p-3 soc-subbox h-100">
-                              <div className="fw-semibold mb-2 text-lb-cyan">
-                                Key Malicious Indicators (Defanged)
-                              </div>
-                              {indicatorList.length === 0 ? (
-                                <div className="text-secondary small">None recorded</div>
-                              ) : (
-                                <ul className="bullet-list mono-text">
-                                  {indicatorList.map((ind, i) => (
-                                    <li key={i}>{ind}</li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          </Col>
-                        </Row>
-                      </Card.Body>
-                    </Card>
-
-                    {/* External Research Links & Summaries (Every item individually removable) */}
-                    <Card className="soc-card">
-                      <Card.Header className="soc-card-header">
-                        External Research &amp; Threat Intelligence Links
-                      </Card.Header>
-                      <Card.Body>
-                        <ul className="bullet-list mb-3">
-                          {(activeProject.external_research_link ||
-                            activeProject.external_research_summary) && (
-                            <li className="mb-2">
-                              <div className="d-flex justify-content-between align-items-start">
-                                <div>
-                                  {activeProject.external_research_link && (
-                                    <div>
-                                      <a
-                                        href={activeProject.external_research_link}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-lb-cyan mono-text text-decoration-none"
-                                      >
-                                        {activeProject.external_research_link}{' '}
-                                        <ExternalLink size={12} />
-                                      </a>
-                                    </div>
-                                  )}
-                                  <div className="text-secondary small">
-                                    {activeProject.external_research_summary}
-                                  </div>
-                                </div>
-                                <Button
-                                  variant="outline-secondary"
-                                  size="sm"
-                                  title="Remove external research item"
-                                  onClick={handleClearLegacyInlineResearch}
-                                >
-                                  <Trash2 size={13} />
-                                </Button>
-                              </div>
-                            </li>
+                      {canLockProjects && (
+                        <Button
+                          variant={isProjectLocked ? 'warning' : 'outline-warning'}
+                          size="sm"
+                          onClick={handleToggleProjectLock}
+                          title={
+                            isProjectLocked
+                              ? 'Unlock project to allow editing'
+                              : 'Lock project to make it read-only'
+                          }
+                        >
+                          {isProjectLocked ? (
+                            <>
+                              <Unlock size={14} className="me-1" />
+                              Unlock Project
+                            </>
+                          ) : (
+                            <>
+                              <Lock size={14} className="me-1" />
+                              Lock Project
+                            </>
                           )}
+                        </Button>
+                      )}
 
-                          {(activeProject.external_research_items || []).map((r) => (
-                            <li key={r.id} className="mb-2">
-                              <div className="d-flex justify-content-between align-items-start">
-                                <div>
-                                  {r.link && (
-                                    <div>
-                                      <a
-                                        href={r.link}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-lb-cyan mono-text text-decoration-none"
-                                      >
-                                        {r.link} <ExternalLink size={12} />
-                                      </a>
-                                    </div>
-                                  )}
-                                  <div className="text-secondary small">{r.summary}</div>
-                                  {r.analyst_name && (
-                                    <div className="text-secondary" style={{ fontSize: '0.72rem' }}>
-                                      Added by {r.analyst_name}
-                                    </div>
-                                  )}
-                                </div>
-                                <Button
-                                  variant="outline-secondary"
-                                  size="sm"
-                                  title="Remove external research item"
-                                  onClick={() => handleDeleteExternalResearch(r.id)}
-                                >
-                                  <Trash2 size={13} />
-                                </Button>
+                      {canDeleteProjects && (
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          disabled={isProjectLocked}
+                          title={
+                            isProjectLocked
+                              ? 'Unlock this project before deleting it'
+                              : 'Delete project permanently'
+                          }
+                          onClick={() => setShowDeleteProjectModal(true)}
+                        >
+                          <Trash2 size={14} className="me-1" />
+                          Delete
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Read-Only Banner when Project is Locked */}
+                  {isProjectLocked && (
+                    <div className="locked-banner px-3 py-2 mb-3 small d-flex flex-wrap justify-content-between align-items-center gap-2">
+                      <div className="d-flex align-items-center gap-2">
+                        <Lock size={15} />
+                        <span>
+                          <strong>Project Locked (Read-Only):</strong> Modifications to overview,
+                          evidence, research, and screenshots are disabled
+                          {activeProject.locked_by_display
+                            ? ` (locked by ${activeProject.locked_by_display}${
+                                activeProject.locked_at
+                                  ? ` on ${formatUtcTimestamp(activeProject.locked_at)}`
+                                  : ''
+                              })`
+                            : ''}
+                          . Reports remain available for export.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3-Tab Navigation */}
+                  <Nav
+                    variant="tabs"
+                    className="mb-3"
+                    activeKey={activeTab}
+                    onSelect={(k) => setActiveTab(k)}
+                  >
+                    <Nav.Item>
+                      <Nav.Link eventKey="overview">Project Overview</Nav.Link>
+                    </Nav.Item>
+                    <Nav.Item>
+                      <Nav.Link eventKey="timeline">
+                        Incident Evidence Timeline ({activeProject.evidence_count})
+                      </Nav.Link>
+                    </Nav.Item>
+                    <Nav.Item>
+                      <Nav.Link eventKey="reports">
+                        Incident Report Generation ({activeProject.key_evidence_count} Key)
+                      </Nav.Link>
+                    </Nav.Item>
+                  </Nav>
+
+                  {/* TAB 1: PROJECT OVERVIEW */}
+                  {activeTab === 'overview' && (
+                    <div className="d-flex flex-column gap-3">
+                      <Card className="soc-card">
+                        <Card.Header className="soc-card-header d-flex justify-content-between align-items-center">
+                          <span>Incident Overview</span>
+                          {canModifyActiveProject && (
+                            <Button
+                              variant="outline-light"
+                              size="sm"
+                              onClick={openEditProjectModal}
+                            >
+                              Edit Overview
+                            </Button>
+                          )}
+                        </Card.Header>
+                        <Card.Body>
+                          <Row className="mb-3 g-3">
+                            <Col md={4}>
+                              <div className="text-secondary small">Customer</div>
+                              <div className="fw-semibold">
+                                {activeProject.customer_name || 'N/A'}{' '}
+                                {activeProject.customer_id ? `(${activeProject.customer_id})` : ''}
                               </div>
-                            </li>
-                          ))}
-
-                          {!activeProject.external_research_link &&
-                            !activeProject.external_research_summary &&
-                            (!activeProject.external_research_items ||
-                              activeProject.external_research_items.length === 0) && (
-                              <li className="text-secondary small">No external research recorded.</li>
-                            )}
-                        </ul>
-
-                        <Form onSubmit={handleAddExternalResearch}>
-                          <Row className="g-2">
-                            <Col md={5}>
-                              <Form.Control
-                                size="sm"
-                                type="text"
-                                placeholder="External link (e.g. https://attack.mitre.org/...)"
-                                value={researchLink}
-                                onChange={(e) => setResearchLink(e.target.value)}
-                              />
                             </Col>
-                            <Col md={5}>
-                              <Form.Control
-                                size="sm"
-                                type="text"
-                                placeholder="Summary of external research"
-                                value={researchSummary}
-                                onChange={(e) => setResearchSummary(e.target.value)}
-                              />
+                            <Col md={4}>
+                              <div className="text-secondary small">Ticket Link</div>
+                              <div>
+                                {activeProject.ticket_link ? (
+                                  <a
+                                    href={activeProject.ticket_link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-lb-cyan text-decoration-none"
+                                  >
+                                    {activeProject.ticket_id || activeProject.ticket_link}{' '}
+                                    <ExternalLink size={12} />
+                                  </a>
+                                ) : (
+                                  activeProject.ticket_id || 'N/A'
+                                )}
+                              </div>
                             </Col>
-                            <Col md={2}>
-                              <Button
-                                type="submit"
-                                className="btn-lb-primary w-100"
-                                size="sm"
-                              >
-                                Add Research
-                              </Button>
+                            <Col md={4}>
+                              <div className="text-secondary small">Archive Folder</div>
+                              <div className="mono-text small">
+                                artifacts/{activeProject.artifact_folder}/
+                              </div>
                             </Col>
                           </Row>
-                        </Form>
-                      </Card.Body>
-                    </Card>
-                  </div>
-                )}
 
-                {/* TAB 2: INCIDENT EVIDENCE TIMELINE */}
-                {activeTab === 'timeline' && (
-                  <Card className="soc-card">
-                    <Card.Header className="soc-card-header py-3">
-                      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                        <span>Chronological Evidence Timeline</span>
-                        <div className="d-flex flex-wrap align-items-center gap-2">
-                          <Form.Check
-                            type="switch"
-                            id="key-only-switch"
-                            label="Key Evidence Only"
-                            checked={filterKeyOnly}
-                            onChange={(e) => setFilterKeyOnly(e.target.checked)}
-                            className="me-2 small text-lb-lime"
-                          />
-                          <Form.Select
-                            size="sm"
-                            style={{ width: '175px' }}
-                            value={filterType}
-                            onChange={(e) => setFilterType(e.target.value)}
+                          <div className="mb-4">
+                            <div className="text-secondary small mb-1">Summary of Incident</div>
+                            <div className="p-3 soc-subbox">
+                              {activeProject.summary || 'No summary provided.'}
+                            </div>
+                          </div>
+
+                          {/* Bulleted Lists for Affected Assets (defanged), Users, and Malicious Indicators (defanged) */}
+                          <Row className="g-3">
+                            <Col md={4}>
+                              <div className="p-3 soc-subbox h-100">
+                                <div className="fw-semibold mb-2 text-lb-cyan">
+                                  Key Affected Assets (Defanged)
+                                </div>
+                                {assetList.length === 0 ? (
+                                  <div className="text-secondary small">None recorded</div>
+                                ) : (
+                                  <ul className="bullet-list mono-text">
+                                    {assetList.map((asset, i) => (
+                                      <li key={i}>{asset}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </Col>
+
+                            <Col md={4}>
+                              <div className="p-3 soc-subbox h-100">
+                                <div className="fw-semibold mb-2 text-lb-cyan">
+                                  Key Affected Users
+                                </div>
+                                {userList.length === 0 ? (
+                                  <div className="text-secondary small">None recorded</div>
+                                ) : (
+                                  <ul className="bullet-list mono-text">
+                                    {userList.map((u, i) => (
+                                      <li key={i}>{u}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </Col>
+
+                            <Col md={4}>
+                              <div className="p-3 soc-subbox h-100">
+                                <div className="fw-semibold mb-2 text-lb-cyan">
+                                  Key Malicious Indicators (Defanged)
+                                </div>
+                                {indicatorList.length === 0 ? (
+                                  <div className="text-secondary small">None recorded</div>
+                                ) : (
+                                  <ul className="bullet-list mono-text">
+                                    {indicatorList.map((ind, i) => (
+                                      <li key={i}>{ind}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </Col>
+                          </Row>
+                        </Card.Body>
+                      </Card>
+
+                      {/* External Research Links & Summaries */}
+                      <Card className="soc-card">
+                        <Card.Header className="soc-card-header">
+                          External Research &amp; Threat Intelligence Links
+                        </Card.Header>
+                        <Card.Body>
+                          <ul
+                            className={`bullet-list ${canModifyActiveProject ? 'mb-3' : 'mb-0'}`}
                           >
-                            <option value="ALL">All Types</option>
-                            <option value="ATOMIC">Atomic Events</option>
-                            <option value="SEARCH">Search Results</option>
-                          </Form.Select>
-                          <Form.Control
-                            size="sm"
-                            type="text"
-                            placeholder="Filter timeline..."
-                            style={{ width: '190px' }}
-                            value={searchFilter}
-                            onChange={(e) => setSearchFilter(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                    </Card.Header>
-                    <Card.Body className="p-0">
-                      {filteredTimeline.length === 0 ? (
-                        <div className="text-center py-5 text-secondary">
-                          No evidence items recorded for this filter.
-                        </div>
-                      ) : (
-                        <Table responsive hover variant="dark" className="mb-0 align-middle">
-                          <thead className="small text-secondary text-uppercase">
-                            <tr>
-                              <th style={{ width: '90px' }}>Key</th>
-                              <th style={{ width: '185px' }}>Timestamp (UTC)</th>
-                              <th style={{ width: '130px' }}>Type / Analyst</th>
-                              <th style={{ width: '175px' }}>Asset &amp; User</th>
-                              <th>Analyst Notes, Indicators &amp; Commands</th>
-                              <th style={{ width: '180px' }}>MITRE ATT&amp;CK</th>
-                              <th style={{ width: '150px' }}>Screenshots</th>
-                              <th style={{ width: '150px' }}>Links</th>
-                              <th style={{ width: '100px' }} className="text-end">
-                                Actions
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredTimeline.map((item) => (
-                              <tr
-                                key={item.id}
-                                className={item.is_key_evidence ? 'timeline-row-key' : ''}
-                              >
-                                <td>
-                                  <Button
-                                    variant={item.is_key_evidence ? 'outline-light' : 'outline-secondary'}
-                                    size="sm"
-                                    onClick={() => handleToggleKeyEvidence(item.id)}
-                                    title="Toggle Key Evidence"
-                                  >
-                                    <Star
-                                      size={14}
-                                      fill={item.is_key_evidence ? '#9CEF69' : 'none'}
-                                      color={item.is_key_evidence ? '#9CEF69' : '#94a3b8'}
-                                      className="me-1"
-                                    />
-                                    <span className={item.is_key_evidence ? 'text-lb-lime' : ''}>
-                                      {item.is_key_evidence ? 'Key' : 'Flag'}
-                                    </span>
-                                  </Button>
-                                </td>
-
-                                <td className="mono-text small">
-                                  <div className="text-white">{formatUtcTimestamp(item.timestamp)}</div>
-                                  {item.evidence_type === 'SEARCH' && item.end_timestamp && (
-                                    <div className="text-secondary mt-1">
-                                      to {formatUtcTimestamp(item.end_timestamp)}
-                                    </div>
-                                  )}
-                                </td>
-
-                                <td className="small">
-                                  <div className="fw-semibold text-lb-cyan">
-                                    {item.evidence_type === 'ATOMIC' ? 'Atomic Event' : 'Search Result'}
-                                  </div>
-                                  <div className="text-secondary">{item.analyst_name || '—'}</div>
-                                </td>
-
-                                <td className="mono-text small">
-                                  <div>{defangText(item.affected_asset) || '—'}</div>
-                                  <div className="text-secondary mt-1">
-                                    {item.affected_user || '—'}
-                                    {item.user_created_by_attacker && ' (Attacker-Created)'}
-                                  </div>
-                                </td>
-
-                                <td className="small">
-                                  {item.summary && <div className="mb-1">{item.summary}</div>}
-                                  {item.notes && (
-                                    <div className="text-secondary mb-1">Notes: {item.notes}</div>
-                                  )}
-                                  {item.malicious_hosts_ips && (
-                                    <div className="mono-text text-lb-cyan mb-1">
-                                      Indicators: {defangText(item.malicious_hosts_ips)}
-                                    </div>
-                                  )}
-                                  {item.commands_run && (
-                                    <pre className="cmd-pre mt-1">{defangText(item.commands_run)}</pre>
-                                  )}
-                                </td>
-
-                                <td className="small">
-                                  {item.mitre_tactic || item.mitre_technique ? (
-                                    <div>
-                                      {item.mitre_tactic && (
-                                        <div className="fw-semibold">{item.mitre_tactic}</div>
-                                      )}
-                                      {item.mitre_technique && (
-                                        <div className="text-secondary mono-text">
-                                          {item.mitre_technique}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-secondary">—</span>
-                                  )}
-                                </td>
-
-                                <td>
-                                  {item.screenshots && item.screenshots.length > 0 ? (
-                                    <div className="d-flex flex-wrap gap-2">
-                                      {item.screenshots.map((shot) => (
-                                        <div
-                                          key={shot.id}
-                                          className="position-relative d-inline-block"
+                            {(activeProject.external_research_link ||
+                              activeProject.external_research_summary) && (
+                              <li className="mb-2">
+                                <div className="d-flex justify-content-between align-items-start">
+                                  <div>
+                                    {activeProject.external_research_link && (
+                                      <div>
+                                        <a
+                                          href={activeProject.external_research_link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-lb-cyan mono-text text-decoration-none"
                                         >
-                                          <img
-                                            src={shot.image_url}
-                                            alt={shot.caption || shot.filename}
-                                            title={shot.caption || shot.filename}
-                                            className="screenshot-thumb"
-                                            onClick={() => setPreviewScreenshot(shot)}
-                                          />
-                                          <button
-                                            type="button"
-                                            title="Delete screenshot"
-                                            onClick={() => handleDeleteScreenshot(shot.id)}
-                                            className="btn btn-sm btn-dark position-absolute top-0 end-0 p-0 d-flex align-items-center justify-content-center border-secondary"
-                                            style={{ width: '20px', height: '20px', lineHeight: 1 }}
-                                          >
-                                            <X size={12} />
-                                          </button>
-                                        </div>
-                                      ))}
+                                          {activeProject.external_research_link}{' '}
+                                          <ExternalLink size={12} />
+                                        </a>
+                                      </div>
+                                    )}
+                                    <div className="text-secondary small">
+                                      {activeProject.external_research_summary}
                                     </div>
-                                  ) : (
-                                    <span className="text-secondary small">—</span>
-                                  )}
-                                </td>
-
-                                {/* Analyst links to logs & searches are NOT defanged */}
-                                <td className="small">
-                                  <div className="d-flex flex-column gap-1">
-                                    {item.related_log_link && (
-                                      <a
-                                        href={item.related_log_link}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-lb-cyan text-decoration-none"
-                                      >
-                                        Log/IDS Link <ExternalLink size={11} />
-                                      </a>
-                                    )}
-                                    {item.search_result_link && (
-                                      <a
-                                        href={item.search_result_link}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-lb-cyan text-decoration-none"
-                                      >
-                                        Search Result <ExternalLink size={11} />
-                                      </a>
-                                    )}
-                                    {item.search_query_link && (
-                                      <a
-                                        href={item.search_query_link}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-lb-cyan text-decoration-none"
-                                      >
-                                        Search Query <ExternalLink size={11} />
-                                      </a>
-                                    )}
-                                    {!item.related_log_link &&
-                                      !item.search_result_link &&
-                                      !item.search_query_link && (
-                                        <span className="text-secondary">—</span>
-                                      )}
                                   </div>
-                                </td>
-
-                                <td className="text-end">
-                                  <div className="d-flex justify-content-end gap-1">
-                                    <Button
-                                      variant="outline-light"
-                                      size="sm"
-                                      onClick={() => openEditEvidenceModal(item)}
-                                    >
-                                      <Edit3 size={13} />
-                                    </Button>
+                                  {canModifyActiveProject && (
                                     <Button
                                       variant="outline-secondary"
                                       size="sm"
-                                      onClick={() => handleDeleteEvidence(item.id)}
+                                      title="Remove external research item"
+                                      onClick={handleClearLegacyInlineResearch}
                                     >
                                       <Trash2 size={13} />
                                     </Button>
+                                  )}
+                                </div>
+                              </li>
+                            )}
+
+                            {(activeProject.external_research_items || []).map((r) => (
+                              <li key={r.id} className="mb-2">
+                                <div className="d-flex justify-content-between align-items-start">
+                                  <div>
+                                    {r.link && (
+                                      <div>
+                                        <a
+                                          href={r.link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-lb-cyan mono-text text-decoration-none"
+                                        >
+                                          {r.link} <ExternalLink size={12} />
+                                        </a>
+                                      </div>
+                                    )}
+                                    <div className="text-secondary small">{r.summary}</div>
+                                    {r.analyst_name && (
+                                      <div
+                                        className="text-secondary"
+                                        style={{ fontSize: '0.72rem' }}
+                                      >
+                                        Added by {r.analyst_name}
+                                      </div>
+                                    )}
                                   </div>
-                                </td>
-                              </tr>
+                                  {canModifyActiveProject && (
+                                    <Button
+                                      variant="outline-secondary"
+                                      size="sm"
+                                      title="Remove external research item"
+                                      onClick={() => handleDeleteExternalResearch(r.id)}
+                                    >
+                                      <Trash2 size={13} />
+                                    </Button>
+                                  )}
+                                </div>
+                              </li>
                             ))}
-                          </tbody>
-                        </Table>
-                      )}
-                    </Card.Body>
-                  </Card>
-                )}
 
-                {/* TAB 3: INCIDENT REPORT GENERATION */}
-                {activeTab === 'reports' && (
-                  <div className="d-flex flex-column gap-3">
-                    <Row className="g-3">
-                      <Col md={6}>
-                        <Card className="soc-card h-100">
-                          <Card.Header className="soc-card-header">
-                            Report 1: Evidence Timeline Report (CSV)
-                          </Card.Header>
-                          <Card.Body className="d-flex flex-column justify-content-between">
-                            <p className="small text-secondary mb-3">
-                              Exports all {activeProject.evidence_count} evidence items in chronological
-                              order as a CSV file, with defanged assets/indicators and MITRE tactics and
-                              techniques.
-                            </p>
-                            <div>
-                              <Button
-                                as="a"
-                                href={api.getCsvReportUrl(activeProject.id)}
-                                className="btn-lb-primary"
-                                size="sm"
-                              >
-                                <FileSpreadsheet size={15} className="me-2" />
-                                Download Timeline CSV
-                              </Button>
-                            </div>
-                          </Card.Body>
-                        </Card>
-                      </Col>
+                            {!activeProject.external_research_link &&
+                              !activeProject.external_research_summary &&
+                              (!activeProject.external_research_items ||
+                                activeProject.external_research_items.length === 0) && (
+                                <li className="text-secondary small">
+                                  No external research recorded.
+                                </li>
+                              )}
+                          </ul>
 
-                      <Col md={6}>
-                        <Card className="soc-card h-100">
-                          <Card.Header className="soc-card-header">
-                            Report 2: Key Evidence Formatted Document (.ODT / .MD)
-                          </Card.Header>
-                          <Card.Body className="d-flex flex-column justify-content-between">
-                            <p className="small text-secondary mb-3">
-                              Exports only the {activeProject.key_evidence_count} Key Evidence items in
-                              chronological order followed by summary tables for Key Assets Affected, Key
-                              Malicious Indicators, and MITRE Tactics &amp; Techniques.
-                            </p>
-                            <div className="d-flex flex-wrap gap-2">
-                              <Button
-                                as="a"
-                                href={api.getOdtReportUrl(activeProject.id)}
-                                className="btn-lb-primary"
-                                size="sm"
-                              >
-                                <FileText size={15} className="me-2" />
-                                Download OpenDocument (.ODT)
-                              </Button>
-                              <Button
-                                as="a"
-                                href={api.getMdZipReportUrl(activeProject.id)}
-                                className="btn-lb-cyan"
-                                size="sm"
-                              >
-                                Download Markdown + Screenshots Folder (.ZIP)
-                              </Button>
-                              <Button
-                                as="a"
-                                href={api.getMdReportUrl(activeProject.id)}
-                                variant="outline-light"
-                                size="sm"
-                              >
-                                Download .MD File
-                              </Button>
-                            </div>
-                          </Card.Body>
-                        </Card>
-                      </Col>
-                    </Row>
+                          {canModifyActiveProject && (
+                            <Form onSubmit={handleAddExternalResearch}>
+                              <Row className="g-2">
+                                <Col md={5}>
+                                  <Form.Control
+                                    size="sm"
+                                    type="text"
+                                    placeholder="External link (e.g. https://attack.mitre.org/...)"
+                                    value={researchLink}
+                                    onChange={(e) => setResearchLink(e.target.value)}
+                                  />
+                                </Col>
+                                <Col md={5}>
+                                  <Form.Control
+                                    size="sm"
+                                    type="text"
+                                    placeholder="Summary of external research"
+                                    value={researchSummary}
+                                    onChange={(e) => setResearchSummary(e.target.value)}
+                                  />
+                                </Col>
+                                <Col md={2}>
+                                  <Button
+                                    type="submit"
+                                    className="btn-lb-primary w-100"
+                                    size="sm"
+                                  >
+                                    Add Research
+                                  </Button>
+                                </Col>
+                              </Row>
+                            </Form>
+                          )}
+                        </Card.Body>
+                      </Card>
+                    </div>
+                  )}
 
-                    {/* Structured Key Evidence Report Preview */}
+                  {/* TAB 2: INCIDENT EVIDENCE TIMELINE */}
+                  {activeTab === 'timeline' && (
                     <Card className="soc-card">
-                      <Card.Header className="soc-card-header">
-                        Report 2 Structure Preview
-                      </Card.Header>
-                      <Card.Body className="d-flex flex-column gap-4">
-                        {/* 1. TITLE & 2. Summary of Incident */}
-                        <div className="p-3 soc-subbox">
-                          <h4 className="text-white fw-bold mb-2">
-                            {activeProject.title || `Incident #${activeProject.id}`}
-                          </h4>
-                          <div className="text-lb-cyan small fw-semibold mb-1">
-                            Summary of Incident
+                      <Card.Header className="soc-card-header py-3">
+                        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                          <span>Chronological Evidence Timeline</span>
+                          <div className="d-flex flex-wrap align-items-center gap-2">
+                            <Form.Check
+                              type="switch"
+                              id="key-only-switch"
+                              label="Key Evidence Only"
+                              checked={filterKeyOnly}
+                              onChange={(e) => setFilterKeyOnly(e.target.checked)}
+                              className="me-2 small text-lb-lime"
+                            />
+                            <Form.Select
+                              size="sm"
+                              style={{ width: '175px' }}
+                              value={filterType}
+                              onChange={(e) => setFilterType(e.target.value)}
+                            >
+                              <option value="ALL">All Types</option>
+                              <option value="ATOMIC">Atomic Events</option>
+                              <option value="SEARCH">Search Results</option>
+                            </Form.Select>
+                            <Form.Control
+                              size="sm"
+                              type="text"
+                              placeholder="Filter timeline..."
+                              style={{ width: '190px' }}
+                              value={searchFilter}
+                              onChange={(e) => setSearchFilter(e.target.value)}
+                            />
                           </div>
-                          <div>{activeProject.summary || 'No summary of incident recorded.'}</div>
                         </div>
+                      </Card.Header>
+                      <Card.Body className="p-0">
+                        {filteredTimeline.length === 0 ? (
+                          <div className="text-center py-5 text-secondary">
+                            No evidence items recorded for this filter.
+                          </div>
+                        ) : (
+                          <Table responsive hover variant="dark" className="mb-0 align-middle">
+                            <thead className="small text-secondary text-uppercase">
+                              <tr>
+                                <th style={{ width: '90px' }}>Key</th>
+                                <th style={{ width: '185px' }}>Timestamp (UTC)</th>
+                                <th style={{ width: '130px' }}>Type / Analyst</th>
+                                <th style={{ width: '175px' }}>Asset &amp; User</th>
+                                <th>Analyst Notes, Indicators &amp; Commands</th>
+                                <th style={{ width: '180px' }}>MITRE ATT&amp;CK</th>
+                                <th style={{ width: '150px' }}>Screenshots</th>
+                                <th style={{ width: '150px' }}>Links</th>
+                                {canModifyActiveProject && (
+                                  <th style={{ width: '100px' }} className="text-end">
+                                    Actions
+                                  </th>
+                                )}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredTimeline.map((item) => (
+                                <tr
+                                  key={item.id}
+                                  className={item.is_key_evidence ? 'timeline-row-key' : ''}
+                                >
+                                  <td>
+                                    {canModifyActiveProject ? (
+                                      <Button
+                                        variant={
+                                          item.is_key_evidence
+                                            ? 'outline-light'
+                                            : 'outline-secondary'
+                                        }
+                                        size="sm"
+                                        onClick={() => handleToggleKeyEvidence(item.id)}
+                                        title="Toggle Key Evidence"
+                                      >
+                                        <Star
+                                          size={14}
+                                          fill={item.is_key_evidence ? '#9CEF69' : 'none'}
+                                          color={item.is_key_evidence ? '#9CEF69' : '#94a3b8'}
+                                          className="me-1"
+                                        />
+                                        <span
+                                          className={item.is_key_evidence ? 'text-lb-lime' : ''}
+                                        >
+                                          {item.is_key_evidence ? 'Key' : 'Flag'}
+                                        </span>
+                                      </Button>
+                                    ) : item.is_key_evidence ? (
+                                      <span className="small text-lb-lime fw-semibold d-inline-flex align-items-center gap-1">
+                                        <Star size={14} fill="#9CEF69" color="#9CEF69" />
+                                        Key
+                                      </span>
+                                    ) : (
+                                      <span className="text-secondary small">—</span>
+                                    )}
+                                  </td>
 
-                        {/* 3. Key Evidence Timeline (starts directly with TIMESTAMP, ASSET, USER:) */}
-                        <div>
-                          <h6 className="text-lb-cyan fw-semibold mb-3">
-                            Key Evidence Timeline ({keyEvidenceItems.length})
-                          </h6>
-                          {keyEvidenceItems.length === 0 ? (
-                            <div className="text-secondary small">
-                              No items flagged as Key Evidence yet.
-                            </div>
-                          ) : (
-                            <div className="d-flex flex-column gap-3">
-                              {keyEvidenceItems.map((item) => {
-                                const tsDisplay =
-                                  item.evidence_type === 'SEARCH' && item.end_timestamp
-                                    ? `${formatUtcTimestamp(item.timestamp)} - ${formatUtcTimestamp(item.end_timestamp)}`
-                                    : formatUtcTimestamp(item.timestamp);
-                                const assetDisplay = defangText(item.affected_asset) || 'N/A';
-                                const userDisplay = item.affected_user
-                                  ? `${item.affected_user}${item.user_created_by_attacker ? ' (Created by Attacker)' : ''}`
-                                  : 'N/A';
-                                const notesDisplay = [item.summary, item.notes]
-                                  .filter(Boolean)
-                                  .join(' — ');
-                                const itemIndicators = parseItems(
-                                  item.malicious_hosts_ips,
-                                  item.commands_run
-                                    ? item.commands_run
-                                        .split('\n')
-                                        .filter(Boolean)
-                                        .map((c) => `Command: ${defangText(c)}`)
-                                    : [],
-                                  true,
-                                );
-                                const links = [
-                                  item.related_log_link,
-                                  item.search_result_link,
-                                  item.search_query_link,
-                                ].filter(Boolean);
-
-                                return (
-                                  <div key={item.id} className="p-3 soc-subbox">
-                                    <div className="fw-bold mono-text text-white mb-2 pb-1 border-bottom border-secondary">
-                                      {tsDisplay}, {assetDisplay}, {userDisplay}:
+                                  <td className="mono-text small">
+                                    <div className="text-white">
+                                      {formatUtcTimestamp(item.timestamp)}
                                     </div>
+                                    {item.evidence_type === 'SEARCH' && item.end_timestamp && (
+                                      <div className="text-secondary mt-1">
+                                        to {formatUtcTimestamp(item.end_timestamp)}
+                                      </div>
+                                    )}
+                                  </td>
 
-                                    <div className="small mb-2">
-                                      <strong>Analyst notes:</strong> {notesDisplay || 'None'}
+                                  <td className="small">
+                                    <div className="fw-semibold text-lb-cyan">
+                                      {item.evidence_type === 'ATOMIC'
+                                        ? 'Atomic Event'
+                                        : 'Search Result'}
                                     </div>
+                                    <div className="text-secondary">{item.analyst_name || '—'}</div>
+                                  </td>
 
-                                    <div className="small mb-2">
-                                      <strong>Key malicious indicators:</strong>
-                                      {itemIndicators.length === 0 ? (
-                                        <span className="ms-1 text-secondary">None</span>
-                                      ) : (
-                                        <ul className="bullet-list mono-text mt-1">
-                                          {itemIndicators.map((ind, i) => (
-                                            <li key={i}>{ind}</li>
-                                          ))}
-                                        </ul>
-                                      )}
+                                  <td className="mono-text small">
+                                    <div>{defangText(item.affected_asset) || '—'}</div>
+                                    <div className="text-secondary mt-1">
+                                      {item.affected_user || '—'}
+                                      {item.user_created_by_attacker && ' (Attacker-Created)'}
                                     </div>
+                                  </td>
 
-                                    <div className="small mb-2">
-                                      <strong>Screenshot:</strong>
-                                      {item.screenshots && item.screenshots.length > 0 ? (
-                                        <div className="d-flex flex-wrap gap-2 mt-1">
-                                          {item.screenshots.map((shot) => (
+                                  <td className="small">
+                                    {item.summary && <div className="mb-1">{item.summary}</div>}
+                                    {item.notes && (
+                                      <div className="text-secondary mb-1">Notes: {item.notes}</div>
+                                    )}
+                                    {item.malicious_hosts_ips && (
+                                      <div className="mono-text text-lb-cyan mb-1">
+                                        Indicators: {defangText(item.malicious_hosts_ips)}
+                                      </div>
+                                    )}
+                                    {item.commands_run && (
+                                      <pre className="cmd-pre mt-1">
+                                        {defangText(item.commands_run)}
+                                      </pre>
+                                    )}
+                                  </td>
+
+                                  <td className="small">
+                                    {item.mitre_tactic || item.mitre_technique ? (
+                                      <div>
+                                        {item.mitre_tactic && (
+                                          <div className="fw-semibold">{item.mitre_tactic}</div>
+                                        )}
+                                        {item.mitre_technique && (
+                                          <div className="text-secondary mono-text">
+                                            {item.mitre_technique}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-secondary">—</span>
+                                    )}
+                                  </td>
+
+                                  <td>
+                                    {item.screenshots && item.screenshots.length > 0 ? (
+                                      <div className="d-flex flex-wrap gap-2">
+                                        {item.screenshots.map((shot) => (
+                                          <div
+                                            key={shot.id}
+                                            className="position-relative d-inline-block"
+                                          >
                                             <img
-                                              key={shot.id}
                                               src={shot.image_url}
                                               alt={shot.caption || shot.filename}
+                                              title={shot.caption || shot.filename}
                                               className="screenshot-thumb"
                                               onClick={() => setPreviewScreenshot(shot)}
                                             />
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <span className="ms-1 text-secondary">None</span>
+                                            {canModifyActiveProject && (
+                                              <button
+                                                type="button"
+                                                title="Delete screenshot"
+                                                onClick={() => handleDeleteScreenshot(shot.id)}
+                                                className="btn btn-sm btn-dark position-absolute top-0 end-0 p-0 d-flex align-items-center justify-content-center border-secondary"
+                                                style={{
+                                                  width: '20px',
+                                                  height: '20px',
+                                                  lineHeight: 1,
+                                                }}
+                                              >
+                                                <X size={12} />
+                                              </button>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-secondary small">—</span>
+                                    )}
+                                  </td>
+
+                                  {/* Analyst links to logs & searches are NOT defanged */}
+                                  <td className="small">
+                                    <div className="d-flex flex-column gap-1">
+                                      {item.related_log_link && (
+                                        <a
+                                          href={item.related_log_link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-lb-cyan text-decoration-none"
+                                        >
+                                          Log/IDS Link <ExternalLink size={11} />
+                                        </a>
                                       )}
-                                    </div>
-
-                                    <div className="small">
-                                      <strong>Links:</strong>{' '}
-                                      {links.length > 0 ? (
-                                        links.map((l, idx) => (
-                                          <React.Fragment key={idx}>
-                                            {idx > 0 && ' , '}
-                                            <a
-                                              href={l}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="text-lb-cyan mono-text text-decoration-none"
-                                            >
-                                              {l} <ExternalLink size={11} />
-                                            </a>
-                                          </React.Fragment>
-                                        ))
-                                      ) : (
-                                        <span className="text-secondary">None</span>
+                                      {item.search_result_link && (
+                                        <a
+                                          href={item.search_result_link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-lb-cyan text-decoration-none"
+                                        >
+                                          Search Result <ExternalLink size={11} />
+                                        </a>
                                       )}
+                                      {item.search_query_link && (
+                                        <a
+                                          href={item.search_query_link}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-lb-cyan text-decoration-none"
+                                        >
+                                          Search Query <ExternalLink size={11} />
+                                        </a>
+                                      )}
+                                      {!item.related_log_link &&
+                                        !item.search_result_link &&
+                                        !item.search_query_link && (
+                                          <span className="text-secondary">—</span>
+                                        )}
                                     </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
+                                  </td>
 
-                        {/* 4. Summary Tables at the Bottom */}
-                        <div>
-                          <h6 className="text-lb-cyan fw-semibold mb-3">
-                            Summary Tables (Bottom of Report)
-                          </h6>
-                          <Row className="g-3">
-                            <Col md={6}>
-                              <Table bordered size="sm" variant="dark" className="mono-text mb-0">
-                                <thead>
-                                  <tr>
-                                    <th className="text-lb-cyan">Key Assets Affected</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {assetList.length === 0 ? (
-                                    <tr>
-                                      <td className="text-secondary">None recorded</td>
-                                    </tr>
-                                  ) : (
-                                    assetList.map((a, i) => (
-                                      <tr key={i}>
-                                        <td>{a}</td>
-                                      </tr>
-                                    ))
+                                  {canModifyActiveProject && (
+                                    <td className="text-end">
+                                      <div className="d-flex justify-content-end gap-1">
+                                        <Button
+                                          variant="outline-light"
+                                          size="sm"
+                                          onClick={() => openEditEvidenceModal(item)}
+                                        >
+                                          <Edit3 size={13} />
+                                        </Button>
+                                        <Button
+                                          variant="outline-secondary"
+                                          size="sm"
+                                          onClick={() => handleDeleteEvidence(item.id)}
+                                        >
+                                          <Trash2 size={13} />
+                                        </Button>
+                                      </div>
+                                    </td>
                                   )}
-                                </tbody>
-                              </Table>
-                            </Col>
-
-                            <Col md={6}>
-                              <Table bordered size="sm" variant="dark" className="mono-text mb-0">
-                                <thead>
-                                  <tr>
-                                    <th className="text-lb-cyan">Key Malicious Indicators</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {indicatorList.length === 0 ? (
-                                    <tr>
-                                      <td className="text-secondary">None recorded</td>
-                                    </tr>
-                                  ) : (
-                                    indicatorList.map((ind, i) => (
-                                      <tr key={i}>
-                                        <td>{ind}</td>
-                                      </tr>
-                                    ))
-                                  )}
-                                </tbody>
-                              </Table>
-                            </Col>
-
-                            <Col md={12}>
-                              <Table bordered size="sm" variant="dark" className="mono-text mb-0">
-                                <thead>
-                                  <tr>
-                                    <th className="text-lb-cyan">MITRE Tactic</th>
-                                    <th className="text-lb-cyan">MITRE Technique</th>
-                                    <th className="text-lb-cyan">Affected Assets</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {!activeProject.mitre_summary ||
-                                  activeProject.mitre_summary.length === 0 ? (
-                                    <tr>
-                                      <td colSpan={3} className="text-secondary">
-                                        No MITRE tactics or techniques recorded
-                                      </td>
-                                    </tr>
-                                  ) : (
-                                    activeProject.mitre_summary.map((row, idx) => (
-                                      <tr key={idx}>
-                                        <td>{row.tactic}</td>
-                                        <td>{row.technique}</td>
-                                        <td>
-                                          {row.assets && row.assets.length > 0
-                                            ? row.assets.join(', ')
-                                            : '—'}
-                                        </td>
-                                      </tr>
-                                    ))
-                                  )}
-                                </tbody>
-                              </Table>
-                            </Col>
-                          </Row>
-                        </div>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        )}
                       </Card.Body>
                     </Card>
-                  </div>
-                )}
-              </>
-            )}
-          </Col>
-        </Row>
+                  )}
+
+                  {/* TAB 3: INCIDENT REPORT GENERATION */}
+                  {activeTab === 'reports' && (
+                    <div className="d-flex flex-column gap-3">
+                      <Row className="g-3">
+                        <Col md={6}>
+                          <Card className="soc-card h-100">
+                            <Card.Header className="soc-card-header">
+                              Report 1: Evidence Timeline Report (CSV)
+                            </Card.Header>
+                            <Card.Body className="d-flex flex-column justify-content-between">
+                              <p className="small text-secondary mb-3">
+                                Exports all {activeProject.evidence_count} evidence items in
+                                chronological order as a CSV file, with defanged assets/indicators
+                                and MITRE tactics and techniques.
+                              </p>
+                              <div>
+                                <Button
+                                  as="a"
+                                  href={api.getCsvReportUrl(activeProject.id)}
+                                  className="btn-lb-primary"
+                                  size="sm"
+                                >
+                                  <FileSpreadsheet size={15} className="me-2" />
+                                  Download Timeline CSV
+                                </Button>
+                              </div>
+                            </Card.Body>
+                          </Card>
+                        </Col>
+
+                        <Col md={6}>
+                          <Card className="soc-card h-100">
+                            <Card.Header className="soc-card-header">
+                              Report 2: Key Evidence Formatted Document (.ODT / .MD)
+                            </Card.Header>
+                            <Card.Body className="d-flex flex-column justify-content-between">
+                              <p className="small text-secondary mb-3">
+                                Exports only the {activeProject.key_evidence_count} Key Evidence
+                                items in chronological order followed by summary tables for Key
+                                Assets Affected, Key Malicious Indicators, and MITRE Tactics &amp;
+                                Techniques.
+                              </p>
+                              <div className="d-flex flex-wrap gap-2">
+                                <Button
+                                  as="a"
+                                  href={api.getOdtReportUrl(activeProject.id)}
+                                  className="btn-lb-primary"
+                                  size="sm"
+                                >
+                                  <FileText size={15} className="me-2" />
+                                  Download OpenDocument (.ODT)
+                                </Button>
+                                <Button
+                                  as="a"
+                                  href={api.getMdZipReportUrl(activeProject.id)}
+                                  className="btn-lb-cyan"
+                                  size="sm"
+                                >
+                                  Download Markdown + Screenshots Folder (.ZIP)
+                                </Button>
+                                <Button
+                                  as="a"
+                                  href={api.getMdReportUrl(activeProject.id)}
+                                  variant="outline-light"
+                                  size="sm"
+                                >
+                                  Download .MD File
+                                </Button>
+                              </div>
+                            </Card.Body>
+                          </Card>
+                        </Col>
+                      </Row>
+
+                      {/* Structured Key Evidence Report Preview */}
+                      <Card className="soc-card">
+                        <Card.Header className="soc-card-header">
+                          Report 2 Structure Preview
+                        </Card.Header>
+                        <Card.Body className="d-flex flex-column gap-4">
+                          {/* 1. TITLE & 2. Summary of Incident */}
+                          <div className="p-3 soc-subbox">
+                            <h4 className="text-white fw-bold mb-2">
+                              {activeProject.title || `Incident #${activeProject.id}`}
+                            </h4>
+                            <div className="text-lb-cyan small fw-semibold mb-1">
+                              Summary of Incident
+                            </div>
+                            <div>
+                              {activeProject.summary || 'No summary of incident recorded.'}
+                            </div>
+                          </div>
+
+                          {/* 3. Key Evidence Timeline */}
+                          <div>
+                            <h6 className="text-lb-cyan fw-semibold mb-3">
+                              Key Evidence Timeline ({keyEvidenceItems.length})
+                            </h6>
+                            {keyEvidenceItems.length === 0 ? (
+                              <div className="text-secondary small">
+                                No items flagged as Key Evidence yet.
+                              </div>
+                            ) : (
+                              <div className="d-flex flex-column gap-3">
+                                {keyEvidenceItems.map((item) => {
+                                  const tsDisplay =
+                                    item.evidence_type === 'SEARCH' && item.end_timestamp
+                                      ? `${formatUtcTimestamp(item.timestamp)} - ${formatUtcTimestamp(item.end_timestamp)}`
+                                      : formatUtcTimestamp(item.timestamp);
+                                  const assetDisplay = defangText(item.affected_asset) || 'N/A';
+                                  const userDisplay = item.affected_user
+                                    ? `${item.affected_user}${item.user_created_by_attacker ? ' (Created by Attacker)' : ''}`
+                                    : 'N/A';
+                                  const notesDisplay = [item.summary, item.notes]
+                                    .filter(Boolean)
+                                    .join(' — ');
+                                  const itemIndicators = parseItems(
+                                    item.malicious_hosts_ips,
+                                    item.commands_run
+                                      ? item.commands_run
+                                          .split('\n')
+                                          .filter(Boolean)
+                                          .map((c) => `Command: ${defangText(c)}`)
+                                      : [],
+                                    true,
+                                  );
+                                  const links = [
+                                    item.related_log_link,
+                                    item.search_result_link,
+                                    item.search_query_link,
+                                  ].filter(Boolean);
+
+                                  return (
+                                    <div key={item.id} className="p-3 soc-subbox">
+                                      <div className="fw-bold mono-text text-white mb-2 pb-1 border-bottom border-secondary">
+                                        {tsDisplay}, {assetDisplay}, {userDisplay}:
+                                      </div>
+
+                                      <div className="small mb-2">
+                                        <strong>Analyst notes:</strong> {notesDisplay || 'None'}
+                                      </div>
+
+                                      <div className="small mb-2">
+                                        <strong>Key malicious indicators:</strong>
+                                        {itemIndicators.length === 0 ? (
+                                          <span className="ms-1 text-secondary">None</span>
+                                        ) : (
+                                          <ul className="bullet-list mono-text mt-1">
+                                            {itemIndicators.map((ind, i) => (
+                                              <li key={i}>{ind}</li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      </div>
+
+                                      <div className="small mb-2">
+                                        <strong>Screenshot:</strong>
+                                        {item.screenshots && item.screenshots.length > 0 ? (
+                                          <div className="d-flex flex-wrap gap-2 mt-1">
+                                            {item.screenshots.map((shot) => (
+                                              <img
+                                                key={shot.id}
+                                                src={shot.image_url}
+                                                alt={shot.caption || shot.filename}
+                                                className="screenshot-thumb"
+                                                onClick={() => setPreviewScreenshot(shot)}
+                                              />
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <span className="ms-1 text-secondary">None</span>
+                                        )}
+                                      </div>
+
+                                      <div className="small">
+                                        <strong>Links:</strong>{' '}
+                                        {links.length > 0 ? (
+                                          links.map((l, idx) => (
+                                            <React.Fragment key={idx}>
+                                              {idx > 0 && ' , '}
+                                              <a
+                                                href={l}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-lb-cyan mono-text text-decoration-none"
+                                              >
+                                                {l} <ExternalLink size={11} />
+                                              </a>
+                                            </React.Fragment>
+                                          ))
+                                        ) : (
+                                          <span className="text-secondary">None</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 4. Summary Tables at the Bottom */}
+                          <div>
+                            <h6 className="text-lb-cyan fw-semibold mb-3">
+                              Summary Tables (Bottom of Report)
+                            </h6>
+                            <Row className="g-3">
+                              <Col md={6}>
+                                <Table bordered size="sm" variant="dark" className="mono-text mb-0">
+                                  <thead>
+                                    <tr>
+                                      <th className="text-lb-cyan">Key Assets Affected</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {assetList.length === 0 ? (
+                                      <tr>
+                                        <td className="text-secondary">None recorded</td>
+                                      </tr>
+                                    ) : (
+                                      assetList.map((a, i) => (
+                                        <tr key={i}>
+                                          <td>{a}</td>
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </Table>
+                              </Col>
+
+                              <Col md={6}>
+                                <Table bordered size="sm" variant="dark" className="mono-text mb-0">
+                                  <thead>
+                                    <tr>
+                                      <th className="text-lb-cyan">Key Malicious Indicators</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {indicatorList.length === 0 ? (
+                                      <tr>
+                                        <td className="text-secondary">None recorded</td>
+                                      </tr>
+                                    ) : (
+                                      indicatorList.map((ind, i) => (
+                                        <tr key={i}>
+                                          <td>{ind}</td>
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </Table>
+                              </Col>
+
+                              <Col md={12}>
+                                <Table bordered size="sm" variant="dark" className="mono-text mb-0">
+                                  <thead>
+                                    <tr>
+                                      <th className="text-lb-cyan">MITRE Tactic</th>
+                                      <th className="text-lb-cyan">MITRE Technique</th>
+                                      <th className="text-lb-cyan">Affected Assets</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {!activeProject.mitre_summary ||
+                                    activeProject.mitre_summary.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={3} className="text-secondary">
+                                          No MITRE tactics or techniques recorded
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      activeProject.mitre_summary.map((row, idx) => (
+                                        <tr key={idx}>
+                                          <td>{row.tactic}</td>
+                                          <td>{row.technique}</td>
+                                          <td>
+                                            {row.assets && row.assets.length > 0
+                                              ? row.assets.join(', ')
+                                              : '—'}
+                                          </td>
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </Table>
+                              </Col>
+                            </Row>
+                          </div>
+                        </Card.Body>
+                      </Card>
+                    </div>
+                  )}
+                </>
+              )}
+            </Col>
+          </Row>
+        )}
       </Container>
 
       {/* Warning Modal when Closing / Archiving an Investigation */}
@@ -1667,6 +2587,43 @@ export default function App() {
           </Button>
           <Button variant="warning" size="sm" onClick={confirmArchiveAction}>
             Archive / Close Investigation
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Modal: Confirm Delete Project (Admin / Super Admin) */}
+      <Modal
+        show={showDeleteProjectModal}
+        onHide={() => setShowDeleteProjectModal(false)}
+        transition={false}
+        centered
+      >
+        <Modal.Header closeButton className="bg-dark border-danger">
+          <Modal.Title className="fs-6 d-flex align-items-center gap-2 text-danger">
+            <AlertTriangle size={18} />
+            <span>Confirm Project Deletion</span>
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="bg-dark text-light small">
+          <p className="mb-2">
+            Permanently delete investigation{' '}
+            <strong>{activeProject?.title || `#${activeProject?.id}`}</strong>?
+          </p>
+          <p className="text-secondary mb-0">
+            This removes the project, all timeline evidence items, external research entries, and
+            its associated artifact directory on disk. This action cannot be undone.
+          </p>
+        </Modal.Body>
+        <Modal.Footer className="bg-dark border-secondary">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setShowDeleteProjectModal(false)}
+          >
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={handleConfirmDeleteProject}>
+            Delete Project Permanently
           </Button>
         </Modal.Footer>
       </Modal>
@@ -1730,7 +2687,9 @@ export default function App() {
                   <Form.Control
                     type="text"
                     value={projectForm.customer_id}
-                    onChange={(e) => setProjectForm({ ...projectForm, customer_id: e.target.value })}
+                    onChange={(e) =>
+                      setProjectForm({ ...projectForm, customer_id: e.target.value })
+                    }
                   />
                 </Form.Group>
               </Col>
@@ -1751,7 +2710,9 @@ export default function App() {
                   <Form.Control
                     type="text"
                     value={projectForm.ticket_link}
-                    onChange={(e) => setProjectForm({ ...projectForm, ticket_link: e.target.value })}
+                    onChange={(e) =>
+                      setProjectForm({ ...projectForm, ticket_link: e.target.value })
+                    }
                   />
                 </Form.Group>
               </Col>
@@ -1796,7 +2757,9 @@ export default function App() {
               </Col>
               <Col md={4}>
                 <Form.Group>
-                  <Form.Label className="small">Key Malicious Indicators (one per line)</Form.Label>
+                  <Form.Label className="small">
+                    Key Malicious Indicators (one per line)
+                  </Form.Label>
                   <Form.Control
                     as="textarea"
                     rows={3}
@@ -1812,19 +2775,26 @@ export default function App() {
                 <>
                   <Col md={5}>
                     <Form.Group>
-                      <Form.Label className="small">Initial External Research Link (Optional)</Form.Label>
+                      <Form.Label className="small">
+                        Initial External Research Link (Optional)
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         value={projectForm.external_research_link}
                         onChange={(e) =>
-                          setProjectForm({ ...projectForm, external_research_link: e.target.value })
+                          setProjectForm({
+                            ...projectForm,
+                            external_research_link: e.target.value,
+                          })
                         }
                       />
                     </Form.Group>
                   </Col>
                   <Col md={7}>
                     <Form.Group>
-                      <Form.Label className="small">Initial External Research Summary (Optional)</Form.Label>
+                      <Form.Label className="small">
+                        Initial External Research Summary (Optional)
+                      </Form.Label>
                       <Form.Control
                         type="text"
                         value={projectForm.external_research_summary}
@@ -1974,14 +2944,18 @@ export default function App() {
                     as="textarea"
                     rows={2}
                     value={evidenceForm.summary}
-                    onChange={(e) => setEvidenceForm({ ...evidenceForm, summary: e.target.value })}
+                    onChange={(e) =>
+                      setEvidenceForm({ ...evidenceForm, summary: e.target.value })
+                    }
                   />
                 </Form.Group>
               </Col>
 
               <Col md={12}>
                 <Form.Group>
-                  <Form.Label className="small">Malicious Hosts / IPs / Domains Involved</Form.Label>
+                  <Form.Label className="small">
+                    Malicious Hosts / IPs / Domains Involved
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     value={evidenceForm.malicious_hosts_ips}
@@ -2056,7 +3030,10 @@ export default function App() {
                         type="text"
                         value={evidenceForm.search_result_link}
                         onChange={(e) =>
-                          setEvidenceForm({ ...evidenceForm, search_result_link: e.target.value })
+                          setEvidenceForm({
+                            ...evidenceForm,
+                            search_result_link: e.target.value,
+                          })
                         }
                       />
                     </Form.Group>
@@ -2068,7 +3045,10 @@ export default function App() {
                         type="text"
                         value={evidenceForm.search_query_link}
                         onChange={(e) =>
-                          setEvidenceForm({ ...evidenceForm, search_query_link: e.target.value })
+                          setEvidenceForm({
+                            ...evidenceForm,
+                            search_query_link: e.target.value,
+                          })
                         }
                       />
                     </Form.Group>
@@ -2163,7 +3143,7 @@ export default function App() {
         </Form>
       </Modal>
 
-      {/* Modal: Screenshot Preview with Delete Button */}
+      {/* Modal: Screenshot Preview */}
       <Modal
         show={Boolean(previewScreenshot)}
         onHide={() => setPreviewScreenshot(null)}
@@ -2186,17 +3166,300 @@ export default function App() {
           )}
         </Modal.Body>
         <Modal.Footer className="bg-dark border-secondary justify-content-between">
-          {previewScreenshot && (
-            <Button
-              variant="outline-danger"
-              size="sm"
-              onClick={() => handleDeleteScreenshot(previewScreenshot.id)}
-            >
-              <Trash2 size={14} className="me-1" />
-              Delete Screenshot
-            </Button>
-          )}
+          <div>
+            {previewScreenshot && canModifyActiveProject && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={() => handleDeleteScreenshot(previewScreenshot.id)}
+              >
+                <Trash2 size={14} className="me-1" />
+                Delete Screenshot
+              </Button>
+            )}
+          </div>
           <Button variant="outline-secondary" size="sm" onClick={() => setPreviewScreenshot(null)}>
+            Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Modal: Create / Edit User Account (Admin & Super Admin) */}
+      <Modal
+        show={showUserModal}
+        onHide={() => setShowUserModal(false)}
+        transition={false}
+        centered
+      >
+        <Form onSubmit={handleSaveUser}>
+          <Modal.Header closeButton className="bg-dark border-secondary">
+            <Modal.Title className="fs-6">
+              {editingUserObj
+                ? `Edit User: ${editingUserObj.username}`
+                : 'Create New User Account'}
+            </Modal.Title>
+          </Modal.Header>
+          <Modal.Body className="bg-dark">
+            <Row className="g-3">
+              {!editingUserObj && (
+                <Col md={12}>
+                  <Form.Group>
+                    <Form.Label className="small">Username</Form.Label>
+                    <Form.Control
+                      type="text"
+                      required
+                      value={userForm.username}
+                      onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
+                    />
+                  </Form.Group>
+                </Col>
+              )}
+
+              <Col md={6}>
+                <Form.Group>
+                  <Form.Label className="small">First Name</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={userForm.first_name}
+                    onChange={(e) => setUserForm({ ...userForm, first_name: e.target.value })}
+                  />
+                </Form.Group>
+              </Col>
+              <Col md={6}>
+                <Form.Group>
+                  <Form.Label className="small">Last Name</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={userForm.last_name}
+                    onChange={(e) => setUserForm({ ...userForm, last_name: e.target.value })}
+                  />
+                </Form.Group>
+              </Col>
+
+              <Col md={12}>
+                <Form.Group>
+                  <Form.Label className="small">Email</Form.Label>
+                  <Form.Control
+                    type="email"
+                    value={userForm.email}
+                    onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                  />
+                </Form.Group>
+              </Col>
+
+              <Col md={12}>
+                <Form.Group>
+                  <Form.Label className="small">User Role</Form.Label>
+                  <Form.Select
+                    value={userForm.role}
+                    onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+                  >
+                    {assignableRoles.map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </Form.Group>
+              </Col>
+
+              {!editingUserObj && (
+                <Col md={12}>
+                  <Form.Group>
+                    <Form.Label className="small">Initial Password</Form.Label>
+                    <Form.Control
+                      type="password"
+                      required
+                      value={userForm.password}
+                      onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    />
+                  </Form.Group>
+                </Col>
+              )}
+
+              <Col md={12}>
+                <Form.Check
+                  type="switch"
+                  id="user-active-switch"
+                  label="Account Active (allowed to sign in)"
+                  checked={userForm.is_active}
+                  onChange={(e) => setUserForm({ ...userForm, is_active: e.target.checked })}
+                />
+              </Col>
+            </Row>
+          </Modal.Body>
+          <Modal.Footer className="bg-dark border-secondary">
+            <Button variant="outline-secondary" size="sm" onClick={() => setShowUserModal(false)}>
+              Cancel
+            </Button>
+            <Button className="btn-lb-primary" size="sm" type="submit">
+              {editingUserObj ? 'Save Changes' : 'Create User'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      {/* Modal: Reset User Password (Admin & Super Admin) */}
+      <Modal
+        show={Boolean(resetTargetUser)}
+        onHide={() => setResetTargetUser(null)}
+        transition={false}
+        centered
+      >
+        <Form onSubmit={handleConfirmPasswordReset}>
+          <Modal.Header closeButton className="bg-dark border-secondary">
+            <Modal.Title className="fs-6">
+              Reset Password for {resetTargetUser?.username}
+            </Modal.Title>
+          </Modal.Header>
+          <Modal.Body className="bg-dark">
+            <p className="small text-secondary mb-3">
+              Enter a new password for <strong>{resetTargetUser?.username}</strong> (
+              {ROLE_LABELS[resetTargetUser?.role] || resetTargetUser?.role}). Active sessions and
+              API tokens for this user will be invalidated.
+            </p>
+            <Form.Group>
+              <Form.Label className="small">New Password</Form.Label>
+              <Form.Control
+                type="password"
+                required
+                autoFocus
+                value={resetNewPassword}
+                onChange={(e) => setResetNewPassword(e.target.value)}
+              />
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer className="bg-dark border-secondary">
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => setResetTargetUser(null)}
+            >
+              Cancel
+            </Button>
+            <Button className="btn-lb-primary" size="sm" type="submit">
+              Reset Password
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      {/* Modal: Confirm Delete User */}
+      <Modal
+        show={Boolean(deleteTargetUser)}
+        onHide={() => setDeleteTargetUser(null)}
+        transition={false}
+        centered
+      >
+        <Modal.Header closeButton className="bg-dark border-danger">
+          <Modal.Title className="fs-6 text-danger">Confirm User Deletion</Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="bg-dark text-light small">
+          Are you sure you want to permanently delete user{' '}
+          <strong>{deleteTargetUser?.username}</strong>?
+        </Modal.Body>
+        <Modal.Footer className="bg-dark border-secondary">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setDeleteTargetUser(null)}
+          >
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={handleConfirmDeleteUser}>
+            Delete User
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Modal: Self Account Settings (Change Own Password & SOC API Token) */}
+      <Modal
+        show={showAccountModal}
+        onHide={() => setShowAccountModal(false)}
+        transition={false}
+        centered
+      >
+        <Modal.Header closeButton className="bg-dark border-secondary">
+          <Modal.Title className="fs-6">
+            Account Settings — {authUser.username} ({ROLE_LABELS[authUser.role] || authUser.role})
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="bg-dark">
+          <Form onSubmit={handleChangeOwnPassword} className="mb-3">
+            <div className="fw-semibold small text-lb-cyan mb-2">Change Your Password</div>
+            <Form.Group className="mb-2">
+              <Form.Label className="small">Current Password</Form.Label>
+              <Form.Control
+                type="password"
+                required
+                value={ownPasswordForm.current_password}
+                onChange={(e) =>
+                  setOwnPasswordForm({ ...ownPasswordForm, current_password: e.target.value })
+                }
+              />
+            </Form.Group>
+            <Form.Group className="mb-2">
+              <Form.Label className="small">New Password</Form.Label>
+              <Form.Control
+                type="password"
+                required
+                value={ownPasswordForm.new_password}
+                onChange={(e) =>
+                  setOwnPasswordForm({ ...ownPasswordForm, new_password: e.target.value })
+                }
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label className="small">Confirm New Password</Form.Label>
+              <Form.Control
+                type="password"
+                required
+                value={ownPasswordForm.confirm_password}
+                onChange={(e) =>
+                  setOwnPasswordForm({ ...ownPasswordForm, confirm_password: e.target.value })
+                }
+              />
+            </Form.Group>
+            <Button type="submit" className="btn-lb-primary" size="sm">
+              Update Password
+            </Button>
+          </Form>
+
+          {canEditRole && (
+            <div className="pt-3 border-top border-secondary">
+              <div className="fw-semibold small text-lb-cyan mb-1">
+                Programmatic SOC Ingestion API Token
+              </div>
+              <p className="text-secondary small mb-2">
+                Pass <code>Authorization: Token &lt;token&gt;</code> when posting automated SIEM /
+                SOAR / IDS events to <code>/api/soc/ingest/</code>.
+              </p>
+              <InputGroup size="sm">
+                <Form.Control
+                  type="text"
+                  readOnly
+                  className="mono-text bg-dark text-light border-secondary"
+                  value={apiTokenLoading ? 'Loading...' : apiTokenValue}
+                />
+                <Button
+                  variant="outline-warning"
+                  onClick={handleRotateApiToken}
+                  disabled={apiTokenLoading}
+                  title="Generate a new token and invalidate the current one"
+                >
+                  <RefreshCw size={13} className="me-1" />
+                  Rotate
+                </Button>
+              </InputGroup>
+            </div>
+          )}
+        </Modal.Body>
+        <Modal.Footer className="bg-dark border-secondary">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setShowAccountModal(false)}
+          >
             Close
           </Button>
         </Modal.Footer>

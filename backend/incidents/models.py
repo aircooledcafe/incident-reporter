@@ -1,10 +1,114 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import slugify
+
+
+class UserProfile(models.Model):
+    ROLE_SUPER_ADMIN = 'SUPER_ADMIN'
+    ROLE_ADMIN = 'ADMIN'
+    ROLE_ANALYST = 'ANALYST'
+    ROLE_EXECUTIVE = 'EXECUTIVE'
+
+    ROLE_CHOICES = [
+        (ROLE_SUPER_ADMIN, 'Super Admin'),
+        (ROLE_ADMIN, 'Admin'),
+        (ROLE_ANALYST, 'Analyst'),
+        (ROLE_EXECUTIVE, 'Executive'),
+    ]
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='profile',
+    )
+    role = models.CharField(
+        max_length=24,
+        choices=ROLE_CHOICES,
+        default=ROLE_ANALYST,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['user__username']
+
+    def __str__(self):
+        return f"{self.user.username} ({self.get_role_display()})"
+
+
+def sync_user_flags_for_role(user, role: str) -> None:
+    """
+    Synchronizes Django's built-in `is_superuser` and `is_staff` flags with the application role.
+    Only SUPER_ADMIN receives `is_staff=True` and `is_superuser=True` (granting Django /admin/ DB access).
+    ADMIN, ANALYST, and EXECUTIVE never have raw database admin access.
+    """
+    should_be_super = role == UserProfile.ROLE_SUPER_ADMIN
+    changed_fields = []
+    if user.is_superuser != should_be_super:
+        user.is_superuser = should_be_super
+        changed_fields.append('is_superuser')
+    if user.is_staff != should_be_super:
+        user.is_staff = should_be_super
+        changed_fields.append('is_staff')
+    if changed_fields and user.pk:
+        type(user).objects.filter(pk=user.pk).update(
+            is_superuser=should_be_super,
+            is_staff=should_be_super,
+        )
+
+
+def get_or_create_user_profile(user) -> UserProfile:
+    profile, created = UserProfile.objects.get_or_create(
+        user=user,
+        defaults={
+            'role': (
+                UserProfile.ROLE_SUPER_ADMIN
+                if user.is_superuser
+                else UserProfile.ROLE_ANALYST
+            ),
+        },
+    )
+    if not created and user.is_superuser and profile.role != UserProfile.ROLE_SUPER_ADMIN:
+        profile.role = UserProfile.ROLE_SUPER_ADMIN
+        profile.save(update_fields=['role', 'updated_at'])
+    sync_user_flags_for_role(user, profile.role)
+    return profile
+
+
+def get_user_role(user) -> str:
+    if not user or not user.is_authenticated or not user.is_active:
+        return ""
+    return get_or_create_user_profile(user).role
+
+
+def get_user_display_name(user) -> str:
+    if not user or not user.is_authenticated:
+        return ""
+    full = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    return full or user.username
+
+
+@receiver(post_save, sender=get_user_model())
+def _ensure_user_profile_on_save(sender, instance, created, **kwargs):
+    if created:
+        default_role = (
+            UserProfile.ROLE_SUPER_ADMIN
+            if instance.is_superuser
+            else UserProfile.ROLE_ANALYST
+        )
+        UserProfile.objects.get_or_create(
+            user=instance,
+            defaults={'role': default_role},
+        )
+        sync_user_flags_for_role(instance, default_role)
 
 
 def screenshot_upload_path(instance, filename):
@@ -40,6 +144,17 @@ class Project(models.Model):
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='INVESTIGATING')
     lead_analyst = models.CharField(max_length=150, blank=True, default="")
     artifact_folder = models.CharField(max_length=255, blank=True, default="")
+
+    # Read-only project lock managed by Admin / Super Admin
+    is_locked = models.BooleanField(default=False)
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='locked_projects',
+    )
+    locked_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -128,6 +243,9 @@ class Project(models.Model):
             "external_research_summary": self.external_research_summary,
             "additional_external_research": research_list,
             "status": self.status,
+            "is_locked": self.is_locked,
+            "locked_by": self.locked_by.username if self.locked_by_id and self.locked_by else None,
+            "locked_at": self.locked_at.isoformat() if self.locked_at else None,
             "lead_analyst": self.lead_analyst,
             "artifact_folder": folder_name,
             "updated_at": timezone.now().isoformat(),
@@ -150,10 +268,20 @@ class Project(models.Model):
                 project=self,
                 link=inline_link,
                 summary=inline_summary,
-                analyst_name=self.lead_analyst or "Chrisjen Avasarala",
+                analyst_name=self.lead_analyst or "Analyst",
             )
         self.get_or_create_artifact_folder()
         self.sync_archive_manifest()
+
+    def delete(self, *args, **kwargs):
+        folder_name = (self.artifact_folder or "").strip()
+        result = super().delete(*args, **kwargs)
+        if folder_name:
+            artifacts_root = Path(settings.ARTIFACTS_ROOT).resolve()
+            target_dir = (artifacts_root / folder_name).resolve()
+            if target_dir.parent == artifacts_root and target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+        return result
 
     def get_timeline_evidence(self):
         """

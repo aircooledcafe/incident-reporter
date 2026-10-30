@@ -2,9 +2,11 @@ import io
 from datetime import datetime, timezone as dt_timezone
 from django.http import HttpResponse
 from django.core.files.base import ContentFile
+from django.utils import timezone
 from PIL import Image as PilImage, ImageDraw
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -14,6 +16,12 @@ from .models import (
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
+    get_user_display_name,
+)
+from .permissions import (
+    ProjectAccessPermission,
+    InvestigationItemPermission,
+    assert_project_unlocked,
 )
 from .serializers import (
     ProjectSerializer,
@@ -46,8 +54,46 @@ def _create_sample_terminal_screenshot(title: str, lines: list[str]) -> bytes:
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
-    queryset = Project.objects.all()
+    queryset = Project.objects.select_related('locked_by').all()
     serializer_class = ProjectSerializer
+    permission_classes = [ProjectAccessPermission]
+
+    def perform_create(self, serializer):
+        lead = (serializer.validated_data.get('lead_analyst') or '').strip()
+        if not lead:
+            lead = get_user_display_name(self.request.user)
+        serializer.save(lead_analyst=lead)
+
+    def perform_update(self, serializer):
+        assert_project_unlocked(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.is_locked:
+            raise PermissionDenied(
+                "Cannot delete a locked project. Unlock the project first if you intend to delete it."
+            )
+        instance.delete()
+
+    @action(detail=True, methods=['post'])
+    def lock(self, request, pk=None):
+        project = self.get_object()
+        if not project.is_locked:
+            project.is_locked = True
+            project.locked_by = request.user
+            project.locked_at = timezone.now()
+            project.save(update_fields=['is_locked', 'locked_by', 'locked_at', 'updated_at'])
+        return Response(self.get_serializer(project).data)
+
+    @action(detail=True, methods=['post'])
+    def unlock(self, request, pk=None):
+        project = self.get_object()
+        if project.is_locked:
+            project.is_locked = False
+            project.locked_by = None
+            project.locked_at = None
+            project.save(update_fields=['is_locked', 'locked_by', 'locked_at', 'updated_at'])
+        return Response(self.get_serializer(project).data)
 
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
@@ -681,8 +727,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
 
 class EvidenceItemViewSet(viewsets.ModelViewSet):
-    queryset = EvidenceItem.objects.prefetch_related('screenshots').all()
+    queryset = EvidenceItem.objects.select_related('project').prefetch_related('screenshots').all()
     serializer_class = EvidenceItemSerializer
+    permission_classes = [InvestigationItemPermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
@@ -693,7 +740,12 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        instance = serializer.save()
+        project = serializer.validated_data.get('project')
+        assert_project_unlocked(project)
+        analyst = (serializer.validated_data.get('analyst_name') or '').strip()
+        if not analyst:
+            analyst = get_user_display_name(self.request.user)
+        instance = serializer.save(analyst_name=analyst)
         files = self.request.FILES.getlist('screenshots_upload')
         captions = self.request.data.getlist('screenshot_captions') if hasattr(self.request.data, 'getlist') else []
         for idx, img_file in enumerate(files):
@@ -707,6 +759,9 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         instance.project.sync_archive_manifest()
 
     def perform_update(self, serializer):
+        assert_project_unlocked(serializer.instance.project)
+        if 'project' in serializer.validated_data:
+            assert_project_unlocked(serializer.validated_data['project'])
         instance = serializer.save()
         files = self.request.FILES.getlist('screenshots_upload')
         captions = self.request.data.getlist('screenshot_captions') if hasattr(self.request.data, 'getlist') else []
@@ -722,12 +777,14 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         project = instance.project
+        assert_project_unlocked(project)
         instance.delete()
         project.sync_archive_manifest()
 
     @action(detail=True, methods=['post'])
     def toggle_key(self, request, pk=None):
         item = self.get_object()
+        assert_project_unlocked(item.project)
         item.is_key_evidence = not item.is_key_evidence
         item.save(update_fields=['is_key_evidence', 'updated_at'])
         item.project.sync_archive_manifest()
@@ -735,8 +792,9 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
 
 
 class ExternalResearchViewSet(viewsets.ModelViewSet):
-    queryset = ExternalResearch.objects.all()
+    queryset = ExternalResearch.objects.select_related('project').all()
     serializer_class = ExternalResearchSerializer
+    permission_classes = [InvestigationItemPermission]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -746,26 +804,53 @@ class ExternalResearchViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        project = serializer.validated_data.get('project')
+        assert_project_unlocked(project)
+        analyst = (serializer.validated_data.get('analyst_name') or '').strip()
+        if not analyst:
+            analyst = get_user_display_name(self.request.user)
+        instance = serializer.save(analyst_name=analyst)
+        instance.project.sync_archive_manifest()
+
+    def perform_update(self, serializer):
+        assert_project_unlocked(serializer.instance.project)
+        if 'project' in serializer.validated_data:
+            assert_project_unlocked(serializer.validated_data['project'])
         instance = serializer.save()
         instance.project.sync_archive_manifest()
 
     def perform_destroy(self, instance):
         project = instance.project
+        assert_project_unlocked(project)
         instance.delete()
         project.sync_archive_manifest()
 
 
 class EvidenceScreenshotViewSet(viewsets.ModelViewSet):
-    queryset = EvidenceScreenshot.objects.all()
+    queryset = EvidenceScreenshot.objects.select_related('evidence__project').all()
     serializer_class = EvidenceScreenshotSerializer
+    permission_classes = [InvestigationItemPermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def perform_create(self, serializer):
+        evidence = serializer.validated_data.get('evidence')
+        assert_project_unlocked(evidence.project)
+        analyst = (serializer.validated_data.get('analyst_name') or '').strip()
+        if not analyst:
+            analyst = get_user_display_name(self.request.user)
+        instance = serializer.save(analyst_name=analyst)
+        instance.evidence.project.sync_archive_manifest()
+
+    def perform_update(self, serializer):
+        assert_project_unlocked(serializer.instance.evidence.project)
+        if 'evidence' in serializer.validated_data:
+            assert_project_unlocked(serializer.validated_data['evidence'].project)
         instance = serializer.save()
         instance.evidence.project.sync_archive_manifest()
 
     def perform_destroy(self, instance):
         project = instance.evidence.project
+        assert_project_unlocked(project)
         instance.delete()
         project.sync_archive_manifest()
 
@@ -774,7 +859,10 @@ class SOCIngestAPIView(APIView):
     """
     Integration endpoint for existing Python/Django SOC tools (SIEM, SOAR, IDS)
     to programmatically push Atomic or Search Result evidence into an incident project.
+    Requires Analyst, Admin, or Super Admin credentials (e.g. `Authorization: Token <token>`).
     """
+    permission_classes = [InvestigationItemPermission]
+
     def post(self, request):
         project_id = request.data.get('project_id') or request.data.get('project')
         ticket_id = request.data.get('ticket_id')
@@ -791,8 +879,12 @@ class SOCIngestAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        assert_project_unlocked(project)
+
         payload = request.data.copy()
         payload['project'] = project.pk
+        if not (payload.get('analyst_name') or '').strip():
+            payload['analyst_name'] = get_user_display_name(request.user)
         serializer = EvidenceItemSerializer(data=payload)
         serializer.is_valid(raise_exception=True)
         item = serializer.save()

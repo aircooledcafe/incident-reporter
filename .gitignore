@@ -12,6 +12,10 @@ env/
 backend/db.sqlite3
 db.sqlite3
 *.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+backend/staticfiles/
 
 # Node / React / Vite
 frontend/node_modules/

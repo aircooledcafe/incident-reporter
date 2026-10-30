@@ -45,6 +45,27 @@ body {
   color: var(--lb-text-primary);
 }
 
+.auth-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: radial-gradient(circle at top, #0b1c3d 0%, var(--lb-bg-deep) 65%);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 460px;
+}
+
+.locked-banner {
+  background-color: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 0.4rem;
+  color: #fde68a;
+}
+
 /* Slightly more padding around buttons + LevelBlue styling */
 .btn {
   padding: 0.48rem 1.1rem;

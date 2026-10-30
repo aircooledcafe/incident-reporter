@@ -7,12 +7,15 @@ if [ -z "${DJANGO_SECRET_KEY}" ]; then
     exit 1
 fi
 
-# Ensure mapped volume directories exist
+# Ensure external/mapped volume directories exist for database (users, sessions, projects) and artifacts
 mkdir -p "$(dirname "${DJANGO_DB_PATH:-/data/db/db.sqlite3}")"
 mkdir -p "${DJANGO_ARTIFACTS_ROOT:-/data/artifacts}"
 
 echo "[Backend] Running database migrations on ${DJANGO_DB_PATH:-/data/db/db.sqlite3}..."
 python manage.py migrate --noinput
+
+echo "[Backend] Checking optional initial Super Admin bootstrap..."
+python manage.py ensure_superuser
 
 echo "[Backend] Starting server on 0.0.0.0:8000..."
 exec gunicorn config.wsgi:application \

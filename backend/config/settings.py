@@ -48,6 +48,17 @@ ALLOWED_HOSTS = [
     if h.strip()
 ]
 
+# Reverse-proxy & CSRF support for Docker / Nginx / LAN / HTTPS deployments
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+_csrf_origins_raw = os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').strip()
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in _csrf_origins_raw.split(',')
+    if origin.strip()
+]
+
 
 # Application definition
 
@@ -60,6 +71,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'rest_framework',
+    'rest_framework.authtoken',
     'incidents',
 ]
 
@@ -75,6 +87,23 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+
+# Persist all user sessions in the external/mapped database (never ephemeral container memory)
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
 
 ROOT_URLCONF = 'config.urls'
 
@@ -99,7 +128,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
-# Supports DJANGO_DB_PATH for mapped Docker volume persistence across container rebuilds/updates.
+# Supports DJANGO_DB_PATH for mapped Docker volume / external storage persistence
+# across container rebuilds, updates, and restarts (includes users, profiles, tokens, sessions, and projects).
 DB_PATH = Path(os.environ.get('DJANGO_DB_PATH', str(BASE_DIR / 'db.sqlite3')))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -107,6 +137,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': DB_PATH,
+        'OPTIONS': {
+            'timeout': 20,
+        },
     }
 }
 
@@ -142,14 +175,13 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.1/howto/static-files/
-
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Static files (CSS, JavaScript, Images) for Django /admin/
+# Uses /django-static/ so it never collides with frontend SPA assets behind Nginx/Vite
+STATIC_URL = '/django-static/'
+STATIC_ROOT = Path(os.environ.get('DJANGO_STATIC_ROOT', str(BASE_DIR / 'staticfiles')))
 
 # Artifacts & Media directory for incident investigations and archives
-# Supports DJANGO_ARTIFACTS_ROOT for mapped Docker volume persistence across container rebuilds/updates.
+# Supports DJANGO_ARTIFACTS_ROOT for mapped Docker volume / external storage persistence.
 ARTIFACTS_ROOT = Path(os.environ.get('DJANGO_ARTIFACTS_ROOT', str(BASE_DIR.parent / 'artifacts')))
 ARTIFACTS_ROOT.mkdir(parents=True, exist_ok=True)
 MEDIA_URL = '/artifacts/'
