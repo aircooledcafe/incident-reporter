@@ -22,6 +22,7 @@ from .models import (
 from .permissions import (
     build_user_permissions_summary,
     can_actor_modify_user,
+    can_user_delete_evidence_item,
     validate_user_management_action,
 )
 from .reports import collect_mitre_summary
@@ -326,6 +327,8 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
         source='get_evidence_type_display',
         read_only=True,
     )
+    created_by_username = serializers.SerializerMethodField()
+    can_actor_delete = serializers.SerializerMethodField()
 
     class Meta:
         model = EvidenceItem
@@ -335,6 +338,9 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
             'evidence_type',
             'evidence_type_display',
             'analyst_name',
+            'created_by',
+            'created_by_username',
+            'can_actor_delete',
             'timestamp',
             'end_timestamp',
             'summary',
@@ -354,7 +360,27 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'evidence_type_display', 'screenshots']
+        read_only_fields = [
+            'id',
+            'created_by',
+            'created_by_username',
+            'can_actor_delete',
+            'created_at',
+            'updated_at',
+            'evidence_type_display',
+            'screenshots',
+        ]
+
+    def get_created_by_username(self, obj) -> str:
+        if obj.created_by_id and obj.created_by:
+            return obj.created_by.username
+        return ""
+
+    def get_can_actor_delete(self, obj) -> bool:
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        return can_user_delete_evidence_item(request.user, obj)
 
 
 class RelatedIncidentSerializer(serializers.ModelSerializer):
@@ -482,7 +508,7 @@ class ProjectSerializer(serializers.ModelSerializer):
 
     def get_timeline_evidence(self, obj):
         items = obj.get_timeline_evidence()
-        return EvidenceItemSerializer(items, many=True).data
+        return EvidenceItemSerializer(items, many=True, context=self.context).data
 
     def get_evidence_count(self, obj):
         return obj.evidence_items.count()

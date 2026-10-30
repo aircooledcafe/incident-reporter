@@ -290,6 +290,20 @@ body {
   border: 1px solid #495057;
   border-radius: 0.375rem;
   cursor: pointer;
+  max-width: 100%;
+}
+
+.modal-dialog.evidence-detail-modal {
+  max-width: min(1080px, 94vw);
+}
+
+.mitre-badge-wrap {
+  white-space: normal !important;
+  text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  line-height: 1.35;
 }
 
 .mitre-multiselect-trigger:hover,

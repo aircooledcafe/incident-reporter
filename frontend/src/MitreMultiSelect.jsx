@@ -53,7 +53,7 @@ export function MitreTacticsSelect({ value, onChange }) {
         }}
         className="mitre-multiselect-trigger d-flex justify-content-between align-items-center gap-2"
       >
-        <div className="d-flex flex-wrap gap-1 align-items-center">
+        <div className="d-flex flex-wrap gap-1 align-items-center" style={{ minWidth: 0 }}>
           {selected.length === 0 ? (
             <span className="text-secondary small">Select MITRE Tactic(s)...</span>
           ) : (
@@ -61,12 +61,13 @@ export function MitreTacticsSelect({ value, onChange }) {
               <Badge
                 key={t}
                 bg="dark"
-                className="border border-info text-lb-cyan fw-normal d-inline-flex align-items-center gap-1"
+                className="border border-info text-lb-cyan fw-normal d-inline-flex align-items-center gap-1 mitre-badge-wrap"
               >
                 <span>{t}</span>
                 <X
                   size={12}
                   role="button"
+                  className="flex-shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
                     toggleItem(t);
@@ -199,7 +200,7 @@ export function MitreTechniquesSelect({ tacticValue, value, onChange, onAutoAddT
         }}
         className="mitre-multiselect-trigger d-flex justify-content-between align-items-center gap-2"
       >
-        <div className="d-flex flex-wrap gap-1 align-items-center">
+        <div className="d-flex flex-wrap gap-1 align-items-center" style={{ minWidth: 0 }}>
           {selectedTechniques.length === 0 ? (
             <span className="text-secondary small">
               {selectedTactics.length > 0
@@ -211,12 +212,13 @@ export function MitreTechniquesSelect({ tacticValue, value, onChange, onAutoAddT
               <Badge
                 key={tech}
                 bg="dark"
-                className="border border-secondary text-light mono-text fw-normal d-inline-flex align-items-center gap-1"
+                className="border border-secondary text-light mono-text fw-normal d-inline-flex align-items-center gap-1 mitre-badge-wrap"
               >
                 <span>{tech}</span>
                 <X
                   size={12}
                   role="button"
+                  className="flex-shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
                     toggleTechnique(tech, null);

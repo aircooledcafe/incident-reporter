@@ -22,6 +22,7 @@ from .permissions import (
     ProjectAccessPermission,
     InvestigationItemPermission,
     assert_project_unlocked,
+    assert_can_delete_evidence_item,
 )
 from .serializers import (
     ProjectSerializer,
@@ -91,7 +92,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def timeline(self, request, pk=None):
         project = self.get_object()
         items = project.get_timeline_evidence()
-        serializer = EvidenceItemSerializer(items, many=True)
+        serializer = EvidenceItemSerializer(items, many=True, context={'request': request})
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
@@ -186,7 +187,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
 
 class EvidenceItemViewSet(viewsets.ModelViewSet):
-    queryset = EvidenceItem.objects.select_related('project').prefetch_related('screenshots').all()
+    queryset = (
+        EvidenceItem.objects.select_related('project', 'created_by')
+        .prefetch_related('screenshots')
+        .all()
+    )
     serializer_class = EvidenceItemSerializer
     permission_classes = [InvestigationItemPermission]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -204,7 +209,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         analyst = (serializer.validated_data.get('analyst_name') or '').strip()
         if not analyst:
             analyst = get_user_display_name(self.request.user)
-        instance = serializer.save(analyst_name=analyst)
+        instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
         files = self.request.FILES.getlist('screenshots_upload')
         captions = self.request.data.getlist('screenshot_captions') if hasattr(self.request.data, 'getlist') else []
         for idx, img_file in enumerate(files):
@@ -237,6 +242,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         project = instance.project
         assert_project_unlocked(project)
+        assert_can_delete_evidence_item(self.request.user, instance)
         instance.delete()
         project.sync_archive_manifest()
 
@@ -419,8 +425,11 @@ class SOCIngestAPIView(APIView):
         payload['project'] = project.pk
         if not (payload.get('analyst_name') or '').strip():
             payload['analyst_name'] = get_user_display_name(request.user)
-        serializer = EvidenceItemSerializer(data=payload)
+        serializer = EvidenceItemSerializer(data=payload, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        item = serializer.save()
+        item = serializer.save(created_by=request.user)
         project.sync_archive_manifest()
-        return Response(EvidenceItemSerializer(item).data, status=status.HTTP_201_CREATED)
+        return Response(
+            EvidenceItemSerializer(item, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )

@@ -30,6 +30,7 @@ A full-stack SOC investigation management, chronological evidence timeline const
 
 4. **Streamlined Evidence Timeline, Click-to-Inspect Detail Popup & MITRE Multi-Select**
    - **Clean Timeline View + Full Detail Popup**: The **Evidence Timeline** table focuses on **Key** status, **Timestamp (UTC)**, **Asset & User**, **Summary & Indicators**, and **Links**. Clicking any row opens a comprehensive **Evidence Item Details** popup displaying every recorded detail (analyst attribution, evidence type, timestamps, defanged assets/indicators/commands, MITRE ATT&CK Tactics & Techniques, links, and attached screenshots).
+   - **Protected Timeline Deletion & Warning Confirmation**: Deleting any timeline item prompts a confirmation warning dialog and is strictly restricted to the **user who created the item**, an **Admin**, or a **Super Admin** (on unlocked investigations).
    - **MITRE ATT&CK Multi-Select Dropdowns**: Evidence items feature multi-select menus for Enterprise **MITRE Tactics** and **MITRE Techniques**, dynamically filtering relevant techniques for the selected tactic(s) and pairing them in report summary tables.
    - **Scoped Defanging**: Automatically defangs affected or malicious assets, hostnames, domains, files, IPs, and URLs (`192.168[.]1.1`, `domain[.]com`, `hxxps[:]//`, `payload[.]exe`) while keeping analyst-provided links intact and clickable.
 
@@ -191,6 +192,7 @@ erDiagram
     EvidenceItem {
         int id PK
         int project_id FK
+        int created_by_id FK "Nullable -> auth_user (creator)"
         string evidence_type "ATOMIC | SEARCH"
         string analyst_name
         datetime timestamp "Event time (ATOMIC) or Start time (SEARCH)"

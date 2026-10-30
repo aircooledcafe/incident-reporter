@@ -272,6 +272,7 @@ class Project(models.Model):
                 "notes": e.notes,
                 "is_key_evidence": e.is_key_evidence,
                 "analyst_name": e.analyst_name,
+                "created_by": e.created_by.username if e.created_by_id and e.created_by else None,
                 "screenshots": [s.image.name for s in e.screenshots.all()],
             }
             for e in self.get_timeline_evidence()
@@ -340,9 +341,13 @@ class Project(models.Model):
         Returns all evidence items ordered chronologically by timestamp (Start Timestamp for Search results,
         Timestamp for Atomic events). Items without a timestamp are placed at the end ordered by creation time.
         """
-        return self.evidence_items.prefetch_related('screenshots').order_by(
-            models.F('timestamp').asc(nulls_last=True),
-            'created_at',
+        return (
+            self.evidence_items.select_related('created_by')
+            .prefetch_related('screenshots')
+            .order_by(
+                models.F('timestamp').asc(nulls_last=True),
+                'created_at',
+            )
         )
 
 
@@ -406,7 +411,7 @@ class EvidenceItem(models.Model):
     EVIDENCE_TYPE_ATOMIC = 'ATOMIC'
     EVIDENCE_TYPE_SEARCH = 'SEARCH'
     EVIDENCE_TYPE_CHOICES = [
-        (EVIDENCE_TYPE_ATOMIC, 'Atomic Event (IDS / Log Event)'),
+        (EVIDENCE_TYPE_ATOMIC, 'Atomic Event'),
         (EVIDENCE_TYPE_SEARCH, 'Search Result (Activity Pattern Over Time)'),
     ]
 
@@ -421,6 +426,13 @@ class EvidenceItem(models.Model):
         default=EVIDENCE_TYPE_ATOMIC,
     )
     analyst_name = models.CharField(max_length=150, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_evidence_items',
+    )
 
     # Timestamps:
     # For ATOMIC events: `timestamp` is the event Timestamp.

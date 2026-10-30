@@ -16,6 +16,7 @@ export default function EvidenceDetailModal({
   onHide,
   defangText,
   canModifyActiveProject,
+  canDeleteItem,
   onToggleKey,
   onEdit,
   onDelete,
@@ -32,7 +33,14 @@ export default function EvidenceDetailModal({
   );
 
   return (
-    <Modal show={show} onHide={onHide} size="lg" transition={false} centered>
+    <Modal
+      show={show}
+      onHide={onHide}
+      size="xl"
+      dialogClassName="evidence-detail-modal"
+      transition={false}
+      centered
+    >
       <Modal.Header closeButton className="bg-dark border-secondary">
         <div className="d-flex flex-wrap align-items-center gap-2">
           <Modal.Title className="fs-6 mb-0 text-white">
@@ -40,7 +48,7 @@ export default function EvidenceDetailModal({
           </Modal.Title>
           <Badge bg="dark" className="border border-info text-lb-cyan fw-normal">
             {item.evidence_type === 'ATOMIC'
-              ? 'Atomic Event (IDS / Log Event)'
+              ? 'Atomic Event'
               : 'Search Result (Activity Pattern Over Time)'}
           </Badge>
           {item.is_key_evidence && (
@@ -158,20 +166,20 @@ export default function EvidenceDetailModal({
           {tactics.length === 0 && techniques.length === 0 ? (
             <div className="small text-secondary">No MITRE ATT&amp;CK mappings recorded.</div>
           ) : (
-            <Row className="g-2">
-              <Col md={6}>
+            <Row className="g-3">
+              <Col md={5} style={{ minWidth: 0 }}>
                 <div className="text-secondary" style={{ fontSize: '0.75rem' }}>
                   Tactics
                 </div>
                 {tactics.length === 0 ? (
                   <div className="small text-secondary">—</div>
                 ) : (
-                  <div className="d-flex flex-wrap gap-1 mt-1">
+                  <div className="d-flex flex-wrap gap-1 mt-1" style={{ minWidth: 0 }}>
                     {tactics.map((tac, idx) => (
                       <Badge
                         key={`tac-${idx}`}
                         bg="dark"
-                        className="border border-info text-lb-cyan fw-normal"
+                        className="border border-info text-lb-cyan fw-normal mitre-badge-wrap"
                       >
                         {tac}
                       </Badge>
@@ -179,19 +187,19 @@ export default function EvidenceDetailModal({
                   </div>
                 )}
               </Col>
-              <Col md={6}>
+              <Col md={7} style={{ minWidth: 0 }}>
                 <div className="text-secondary" style={{ fontSize: '0.75rem' }}>
                   Techniques
                 </div>
                 {techniques.length === 0 ? (
                   <div className="small text-secondary">—</div>
                 ) : (
-                  <div className="d-flex flex-wrap gap-1 mt-1">
+                  <div className="d-flex flex-wrap gap-1 mt-1" style={{ minWidth: 0 }}>
                     {techniques.map((tech, idx) => (
                       <Badge
                         key={`tech-${idx}`}
                         bg="dark"
-                        className="border border-secondary text-light mono-text fw-normal"
+                        className="border border-secondary text-light mono-text fw-normal mitre-badge-wrap"
                       >
                         {tech}
                       </Badge>
@@ -217,7 +225,7 @@ export default function EvidenceDetailModal({
                     href={item.related_log_link}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-lb-cyan mono-text text-decoration-none"
+                    className="text-lb-cyan mono-text text-decoration-none text-break"
                   >
                     {item.related_log_link} <ExternalLink size={12} />
                   </a>
@@ -230,7 +238,7 @@ export default function EvidenceDetailModal({
                     href={item.search_result_link}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-lb-cyan mono-text text-decoration-none"
+                    className="text-lb-cyan mono-text text-decoration-none text-break"
                   >
                     {item.search_result_link} <ExternalLink size={12} />
                   </a>
@@ -243,7 +251,7 @@ export default function EvidenceDetailModal({
                     href={item.search_query_link}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-lb-cyan mono-text text-decoration-none"
+                    className="text-lb-cyan mono-text text-decoration-none text-break"
                   >
                     {item.search_query_link} <ExternalLink size={12} />
                   </a>
@@ -298,7 +306,10 @@ export default function EvidenceDetailModal({
 
         {/* Audit Timestamps */}
         <div className="d-flex flex-wrap justify-content-between text-secondary" style={{ fontSize: '0.74rem' }}>
-          <span>Created: {formatUtcTimestamp(item.created_at)}</span>
+          <span>
+            Created: {formatUtcTimestamp(item.created_at)}
+            {item.created_by_username ? ` by @${item.created_by_username}` : ''}
+          </span>
           <span>Last Updated: {formatUtcTimestamp(item.updated_at)}</span>
         </div>
       </Modal.Body>
@@ -333,17 +344,16 @@ export default function EvidenceDetailModal({
                 <Edit3 size={14} className="me-1" />
                 Edit Evidence
               </Button>
-              <Button
-                variant="outline-danger"
-                size="sm"
-                onClick={() => {
-                  onHide();
-                  onDelete(item.id);
-                }}
-              >
-                <Trash2 size={14} className="me-1" />
-                Delete
-              </Button>
+              {canDeleteItem && (
+                <Button
+                  variant="outline-danger"
+                  size="sm"
+                  onClick={() => onDelete(item)}
+                >
+                  <Trash2 size={14} className="me-1" />
+                  Delete
+                </Button>
+              )}
             </>
           )}
         </div>

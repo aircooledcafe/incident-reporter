@@ -830,3 +830,64 @@ class IncidentReporterTests(TestCase):
         self.assertTrue(created.is_superuser)
         self.assertTrue(created.is_staff)
         self.assertEqual(created.profile.role, UserProfile.ROLE_SUPER_ADMIN)
+
+    def test_timeline_item_deletion_restricted_to_creator_admin_or_super_admin(self):
+        analyst_two = create_user_with_role(
+            "analyst2", "Str0ngAnalyst2Pass!99", UserProfile.ROLE_ANALYST,
+            first_name="Amos", last_name="Burton",
+        )
+
+        # Analyst 1 creates an investigation and 3 timeline items
+        self.client.force_authenticate(user=self.analyst_user)
+        proj_res = self.client.post(
+            "/api/projects/",
+            {"title": "Timeline Ownership Case", "customer_id": "CUST-55"},
+            format="json",
+        )
+        self.assertEqual(proj_res.status_code, 201)
+        proj_id = proj_res.json()["id"]
+
+        item_a = self.client.post(
+            "/api/evidence/",
+            {"project": proj_id, "summary": "Created by Analyst 1 (for creator delete)"},
+            format="json",
+        ).json()
+        item_b = self.client.post(
+            "/api/evidence/",
+            {"project": proj_id, "summary": "Created by Analyst 1 (for Admin delete)"},
+            format="json",
+        ).json()
+        item_c = self.client.post(
+            "/api/evidence/",
+            {"project": proj_id, "summary": "Created by Analyst 1 (for Super Admin delete)"},
+            format="json",
+        ).json()
+
+        self.assertEqual(item_a["created_by"], self.analyst_user.id)
+        self.assertEqual(item_a["created_by_username"], "analyst1")
+        self.assertTrue(item_a["can_actor_delete"])
+
+        # Analyst 2 (did NOT create these items) sees can_actor_delete=False and CANNOT delete them (403)
+        self.client.force_authenticate(user=analyst_two)
+        proj_detail_a2 = self.client.get(f"/api/projects/{proj_id}/").json()
+        for ev in proj_detail_a2["timeline_evidence"]:
+            self.assertFalse(ev["can_actor_delete"])
+        self.assertEqual(self.client.delete(f"/api/evidence/{item_a['id']}/").status_code, 403)
+
+        # Executive also CANNOT delete timeline items
+        self.client.force_authenticate(user=self.exec_user)
+        self.assertEqual(self.client.delete(f"/api/evidence/{item_a['id']}/").status_code, 403)
+
+        # Creator (Analyst 1) CAN delete their own timeline item
+        self.client.force_authenticate(user=self.analyst_user)
+        self.assertEqual(self.client.delete(f"/api/evidence/{item_a['id']}/").status_code, 204)
+
+        # Admin CAN delete timeline items created by another user
+        self.client.force_authenticate(user=self.admin_user)
+        proj_detail_admin = self.client.get(f"/api/projects/{proj_id}/").json()
+        self.assertTrue(proj_detail_admin["timeline_evidence"][0]["can_actor_delete"])
+        self.assertEqual(self.client.delete(f"/api/evidence/{item_b['id']}/").status_code, 204)
+
+        # Super Admin CAN delete timeline items created by another user
+        self.client.force_authenticate(user=self.super_admin)
+        self.assertEqual(self.client.delete(f"/api/evidence/{item_c['id']}/").status_code, 204)

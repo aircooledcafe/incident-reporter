@@ -138,6 +138,29 @@ def assert_project_unlocked(project) -> None:
         )
 
 
+def can_user_delete_evidence_item(user, item) -> bool:
+    """
+    Timeline items can only be deleted (on an unlocked investigation) by the user who
+    created the item or by an Admin / Super Admin.
+    """
+    if not user or not user.is_authenticated or not user.is_active:
+        return False
+    if getattr(item, 'project', None) and item.project.is_locked:
+        return False
+    if is_admin_or_super(user):
+        return True
+    if not can_write_investigations(user):
+        return False
+    return bool(item.created_by_id and item.created_by_id == user.pk)
+
+
+def assert_can_delete_evidence_item(user, item) -> None:
+    if not can_user_delete_evidence_item(user, item):
+        raise PermissionDenied(
+            "Only the user who created this timeline item, an Admin, or a Super Admin can delete it."
+        )
+
+
 class ProjectAccessPermission(permissions.BasePermission):
     """
     - demo_scenarios / seed_demo: SUPER_ADMIN only.

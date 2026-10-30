@@ -284,8 +284,9 @@ export default function App() {
   const [researchLink, setResearchLink] = useState('');
   const [researchSummary, setResearchSummary] = useState('');
 
-  // Evidence item detail popup & Screenshot Lightbox Modal
+  // Evidence item detail popup, delete confirmation popup & Screenshot Lightbox Modal
   const [detailEvidenceId, setDetailEvidenceId] = useState(null);
+  const [deleteTargetEvidence, setDeleteTargetEvidence] = useState(null);
   const [previewScreenshot, setPreviewScreenshot] = useState(null);
 
   // Timeline filters
@@ -903,13 +904,32 @@ export default function App() {
     }
   };
 
-  const handleDeleteEvidence = async (itemId) => {
-    if (!activeProject || !canModifyActiveProject) return;
+  const canUserDeleteEvidenceItem = (item) => {
+    if (!item || !canModifyActiveProject) return false;
+    if (typeof item.can_actor_delete === 'boolean') {
+      return item.can_actor_delete;
+    }
+    return Boolean(canLockProjects || (authUser && item.created_by === authUser.id));
+  };
+
+  const requestDeleteEvidence = (item) => {
+    if (!canUserDeleteEvidenceItem(item)) return;
+    setDeleteTargetEvidence(item);
+  };
+
+  const handleConfirmDeleteEvidence = async () => {
+    if (!activeProject || !deleteTargetEvidence) return;
+    const targetId = deleteTargetEvidence.id;
     try {
-      await api.deleteEvidence(itemId);
+      await api.deleteEvidence(targetId);
+      setDeleteTargetEvidence(null);
+      if (detailEvidenceId === targetId) {
+        setDetailEvidenceId(null);
+      }
       await handleSelectProject(activeProject.id);
-      notifySuccess('Evidence item deleted.');
+      notifySuccess('Timeline evidence item deleted.');
     } catch (err) {
+      setDeleteTargetEvidence(null);
       handleApiError(err, 'Failed to delete evidence');
     }
   };
@@ -2405,14 +2425,16 @@ export default function App() {
                                         >
                                           <Edit3 size={13} />
                                         </Button>
-                                        <Button
-                                          variant="outline-secondary"
-                                          size="sm"
-                                          title="Delete evidence item"
-                                          onClick={() => handleDeleteEvidence(item.id)}
-                                        >
-                                          <Trash2 size={13} />
-                                        </Button>
+                                        {canUserDeleteEvidenceItem(item) && (
+                                          <Button
+                                            variant="outline-danger"
+                                            size="sm"
+                                            title="Delete evidence item"
+                                            onClick={() => requestDeleteEvidence(item)}
+                                          >
+                                            <Trash2 size={13} />
+                                          </Button>
+                                        )}
                                       </div>
                                     </td>
                                   )}
@@ -3038,7 +3060,8 @@ export default function App() {
       <Modal
         show={showEvidenceModal}
         onHide={() => setShowEvidenceModal(false)}
-        size="lg"
+        size="xl"
+        dialogClassName="evidence-detail-modal"
         transition={false}
         centered
       >
@@ -3059,7 +3082,7 @@ export default function App() {
                       setEvidenceForm({ ...evidenceForm, evidence_type: e.target.value })
                     }
                   >
-                    <option value="ATOMIC">Atomic Event (Single IDS / Log Event)</option>
+                    <option value="ATOMIC">Atomic Event</option>
                     <option value="SEARCH">Search Result (Activity Pattern Over Time)</option>
                   </Form.Select>
                 </Form.Group>
@@ -3362,12 +3385,59 @@ export default function App() {
         onHide={() => setDetailEvidenceId(null)}
         defangText={defangText}
         canModifyActiveProject={canModifyActiveProject}
+        canDeleteItem={canUserDeleteEvidenceItem(detailEvidenceItem)}
         onToggleKey={handleToggleKeyEvidence}
         onEdit={openEditEvidenceModal}
-        onDelete={handleDeleteEvidence}
+        onDelete={requestDeleteEvidence}
         onPreviewScreenshot={(shot) => setPreviewScreenshot(shot)}
         onDeleteScreenshot={handleDeleteScreenshot}
       />
+
+      {/* Warning Modal: Confirm Deleting a Timeline Evidence Item */}
+      <Modal
+        show={Boolean(deleteTargetEvidence)}
+        onHide={() => setDeleteTargetEvidence(null)}
+        transition={false}
+        centered
+      >
+        <Modal.Header closeButton className="bg-dark border-danger">
+          <Modal.Title className="fs-6 d-flex align-items-center gap-2 text-danger">
+            <AlertTriangle size={18} />
+            <span>Confirm Timeline Item Deletion</span>
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="bg-dark text-light small">
+          <p className="mb-2">
+            Are you sure you want to permanently delete this timeline evidence item?
+          </p>
+          {deleteTargetEvidence && (
+            <div className="p-2 px-3 mb-2 soc-subbox">
+              <div className="mono-text text-lb-cyan">
+                {formatUtcTimestamp(deleteTargetEvidence.timestamp)}
+              </div>
+              <div className="text-white mt-1">
+                {deleteTargetEvidence.summary || 'No summary recorded'}
+              </div>
+            </div>
+          )}
+          <p className="text-secondary mb-0">
+            This will permanently remove the event and any attached screenshots from the
+            investigation timeline. This action cannot be undone.
+          </p>
+        </Modal.Body>
+        <Modal.Footer className="bg-dark border-secondary">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setDeleteTargetEvidence(null)}
+          >
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={handleConfirmDeleteEvidence}>
+            Delete Timeline Item
+          </Button>
+        </Modal.Footer>
+      </Modal>
 
       {/* Modal: Screenshot Preview */}
       <Modal
