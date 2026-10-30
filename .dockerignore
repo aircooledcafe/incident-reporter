@@ -25,6 +25,9 @@ data/db/*
 artifacts/*
 !artifacts/.gitkeep
 
+# Documentation & sample assets (not needed inside container build context)
+samples
+
 # OS / IDE
 .DS_Store
 .vscode

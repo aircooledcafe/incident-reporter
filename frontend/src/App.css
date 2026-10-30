@@ -286,8 +286,8 @@ body {
 .mitre-multiselect-trigger {
   min-height: 38px;
   padding: 0.35rem 0.65rem;
-  background-color: #212529;
-  border: 1px solid #495057;
+  background-color: #040811;
+  border: 1px solid var(--lb-border);
   border-radius: 0.375rem;
   cursor: pointer;
   max-width: 100%;
@@ -295,6 +295,36 @@ body {
 
 .modal-dialog.evidence-detail-modal {
   max-width: min(1080px, 94vw);
+}
+
+.soc-editor-modal .form-control,
+.soc-editor-modal .form-select {
+  background-color: #040811;
+  border-color: var(--lb-border);
+  color: var(--lb-text-primary);
+}
+
+.soc-editor-modal .form-control::placeholder {
+  color: #64748b;
+}
+
+.soc-editor-modal .form-control:focus,
+.soc-editor-modal .form-select:focus {
+  background-color: #060d1b;
+  border-color: var(--lb-cyan);
+  color: #ffffff;
+  box-shadow: 0 0 0 0.18rem rgba(0, 150, 179, 0.22);
+}
+
+.soc-editor-modal .form-control::file-selector-button {
+  background-color: #0f2347;
+  color: #38bdf8;
+  border-right: 1px solid var(--lb-border);
+}
+
+.soc-editor-modal .form-control:hover::file-selector-button {
+  background-color: #16305e;
+  color: #ffffff;
 }
 
 .mitre-badge-wrap {

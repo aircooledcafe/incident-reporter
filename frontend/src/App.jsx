@@ -37,6 +37,7 @@ import {
   FolderOpen,
   Sparkles,
   Settings,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { api } from './api';
 import HomeDashboard from './HomeDashboard';
@@ -2875,187 +2876,239 @@ export default function App() {
       <Modal
         show={showProjectModal}
         onHide={() => setShowProjectModal(false)}
-        size="lg"
+        size="xl"
+        dialogClassName="evidence-detail-modal"
+        contentClassName="soc-editor-modal"
         transition={false}
         centered
       >
         <Form onSubmit={handleSaveProject}>
           <Modal.Header closeButton className="bg-dark border-secondary">
-            <Modal.Title className="fs-6">
-              {editingProject ? 'Edit Investigation Overview' : 'New Investigation'}
-            </Modal.Title>
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <Modal.Title className="fs-6 mb-0 text-white">
+                {editingProject ? 'Edit Investigation Overview' : 'New Investigation'}
+              </Modal.Title>
+              <Badge bg="dark" className="border border-info text-lb-cyan fw-normal">
+                {editingProject
+                  ? `Investigation #${activeProject?.id || ''}`
+                  : 'Investigation Setup'}
+              </Badge>
+            </div>
           </Modal.Header>
-          <Modal.Body className="bg-dark">
-            <Row className="g-3">
-              <Col md={8}>
-                <Form.Group>
-                  <Form.Label className="small">Title</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={projectForm.title}
-                    onChange={(e) => setProjectForm({ ...projectForm, title: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={4}>
-                <Form.Group>
-                  <Form.Label className="small">Status</Form.Label>
-                  <Form.Select
-                    value={projectForm.status}
-                    onChange={(e) => setProjectForm({ ...projectForm, status: e.target.value })}
-                  >
-                    <option value="OPEN">Open / Triage</option>
-                    <option value="INVESTIGATING">Investigating</option>
-                    <option value="CONTAINED">Contained</option>
-                    <option value="ARCHIVED">Archived / Closed</option>
-                  </Form.Select>
-                </Form.Group>
-              </Col>
+          <Modal.Body className="bg-dark text-light d-flex flex-column gap-3">
+            {/* Section 1: Core Investigation & Customer Metadata */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">
+                Investigation &amp; Customer Metadata
+              </div>
+              <Row className="g-3">
+                <Col md={8}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Title</Form.Label>
+                    <Form.Control
+                      type="text"
+                      value={projectForm.title}
+                      onChange={(e) => setProjectForm({ ...projectForm, title: e.target.value })}
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={4}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Status</Form.Label>
+                    <Form.Select
+                      value={projectForm.status}
+                      onChange={(e) => setProjectForm({ ...projectForm, status: e.target.value })}
+                    >
+                      <option value="OPEN">Open / Triage</option>
+                      <option value="INVESTIGATING">Investigating</option>
+                      <option value="CONTAINED">Contained</option>
+                      <option value="ARCHIVED">Archived / Closed</option>
+                    </Form.Select>
+                  </Form.Group>
+                </Col>
 
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">Customer Name</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={projectForm.customer_name}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, customer_name: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">Customer ID</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={projectForm.customer_id}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, customer_id: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
+                <Col md={6}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Customer Name</Form.Label>
+                    <Form.Control
+                      type="text"
+                      value={projectForm.customer_name}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, customer_name: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={6}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Customer ID</Form.Label>
+                    <Form.Control
+                      type="text"
+                      className="mono-text"
+                      value={projectForm.customer_id}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, customer_id: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
 
-              <Col md={4}>
-                <Form.Group>
-                  <Form.Label className="small">Ticket ID</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={projectForm.ticket_id}
-                    onChange={(e) => setProjectForm({ ...projectForm, ticket_id: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={8}>
-                <Form.Group>
-                  <Form.Label className="small">Ticket Link</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={projectForm.ticket_link}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, ticket_link: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
+                <Col md={4}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Ticket ID</Form.Label>
+                    <Form.Control
+                      type="text"
+                      className="mono-text"
+                      value={projectForm.ticket_id}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, ticket_id: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={8}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Ticket Link</Form.Label>
+                    <Form.Control
+                      type="text"
+                      className="mono-text"
+                      value={projectForm.ticket_link}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, ticket_link: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+              </Row>
+            </div>
 
-              <Col md={12}>
-                <Form.Group>
-                  <Form.Label className="small">Summary of Investigation</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={2}
-                    value={projectForm.summary}
-                    onChange={(e) => setProjectForm({ ...projectForm, summary: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
+            {/* Section 2: Summary of Investigation */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">Summary of Investigation</div>
+              <Form.Group>
+                <Form.Control
+                  as="textarea"
+                  rows={3}
+                  value={projectForm.summary}
+                  onChange={(e) => setProjectForm({ ...projectForm, summary: e.target.value })}
+                />
+              </Form.Group>
+            </div>
 
-              <Col md={7}>
-                <Form.Group>
-                  <Form.Label className="small">
-                    Action Plan (Next steps, areas to investigate, customer info needed)
-                  </Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={3}
-                    value={projectForm.action_plan}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, action_plan: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
+            {/* Section 3: Action Plan & Customer Escalation Notes */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">
+                Action Plan &amp; Customer Escalation Notes
+              </div>
+              <Row className="g-3">
+                <Col md={7}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Action Plan (Next steps, areas to investigate, customer info needed)
+                    </Form.Label>
+                    <Form.Control
+                      as="textarea"
+                      rows={3}
+                      value={projectForm.action_plan}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, action_plan: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
 
-              <Col md={5}>
-                <Form.Group>
-                  <Form.Label className="small">
-                    Customer Bridge / Escalation Notes (Optional)
-                  </Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={3}
-                    placeholder="e.g. 24/7 SOC Bridge +1-555-0199; individual contacts can be added in Overview"
-                    value={projectForm.key_customer_contacts}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, key_customer_contacts: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
+                <Col md={5}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Customer Bridge / Escalation Notes (Optional)
+                    </Form.Label>
+                    <Form.Control
+                      as="textarea"
+                      rows={3}
+                      placeholder="e.g. 24/7 SOC Bridge +1-555-0199; individual contacts can be added in Overview"
+                      value={projectForm.key_customer_contacts}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, key_customer_contacts: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+              </Row>
+            </div>
 
-              <Col md={4}>
-                <Form.Group>
-                  <Form.Label className="small">Key Assets Affected (one per line)</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={3}
-                    value={projectForm.key_assets_affected}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, key_assets_affected: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={4}>
-                <Form.Group>
-                  <Form.Label className="small">Key Users Affected (one per line)</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={3}
-                    value={projectForm.key_users_affected}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, key_users_affected: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={4}>
-                <Form.Group>
-                  <Form.Label className="small">
-                    Key Malicious Indicators (one per line)
-                  </Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={3}
-                    value={projectForm.key_malicious_indicators}
-                    onChange={(e) =>
-                      setProjectForm({ ...projectForm, key_malicious_indicators: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
+            {/* Section 4: Key Scope & Malicious Indicators */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">
+                Key Scope &amp; Malicious Indicators
+              </div>
+              <Row className="g-3">
+                <Col md={4}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Key Assets Affected (one per line)
+                    </Form.Label>
+                    <Form.Control
+                      as="textarea"
+                      rows={3}
+                      className="mono-text"
+                      value={projectForm.key_assets_affected}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, key_assets_affected: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={4}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Key Users Affected (one per line)
+                    </Form.Label>
+                    <Form.Control
+                      as="textarea"
+                      rows={3}
+                      className="mono-text"
+                      value={projectForm.key_users_affected}
+                      onChange={(e) =>
+                        setProjectForm({ ...projectForm, key_users_affected: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={4}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Key Malicious Indicators (one per line)
+                    </Form.Label>
+                    <Form.Control
+                      as="textarea"
+                      rows={3}
+                      className="mono-text"
+                      value={projectForm.key_malicious_indicators}
+                      onChange={(e) =>
+                        setProjectForm({
+                          ...projectForm,
+                          key_malicious_indicators: e.target.value,
+                        })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+              </Row>
+            </div>
 
-              {!editingProject && (
-                <>
+            {/* Section 5: Initial External Research (New Investigation only) */}
+            {!editingProject && (
+              <div className="p-3 soc-subbox">
+                <div className="small fw-semibold text-lb-cyan mb-2">
+                  Initial External Research (Optional)
+                </div>
+                <Row className="g-3">
                   <Col md={5}>
                     <Form.Group>
-                      <Form.Label className="small">
-                        Initial External Research Link (Optional)
-                      </Form.Label>
+                      <Form.Label className="small text-secondary mb-1">Research Link</Form.Label>
                       <Form.Control
                         type="text"
+                        className="mono-text"
                         value={projectForm.external_research_link}
                         onChange={(e) =>
                           setProjectForm({
@@ -3068,8 +3121,8 @@ export default function App() {
                   </Col>
                   <Col md={7}>
                     <Form.Group>
-                      <Form.Label className="small">
-                        Initial External Research Summary (Optional)
+                      <Form.Label className="small text-secondary mb-1">
+                        Research Summary
                       </Form.Label>
                       <Form.Control
                         type="text"
@@ -3083,15 +3136,23 @@ export default function App() {
                       />
                     </Form.Group>
                   </Col>
-                </>
-              )}
-            </Row>
+                </Row>
+              </div>
+            )}
           </Modal.Body>
           <Modal.Footer className="bg-dark border-secondary">
-            <Button variant="outline-secondary" onClick={() => setShowProjectModal(false)}>
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => setShowProjectModal(false)}
+            >
               Cancel
             </Button>
-            <Button className={editingProject ? 'btn-lb-primary' : 'btn-lb-green'} type="submit">
+            <Button
+              className={editingProject ? 'btn-lb-primary' : 'btn-lb-green'}
+              size="sm"
+              type="submit"
+            >
               {editingProject ? 'Save Investigation' : 'New Investigation'}
             </Button>
           </Modal.Footer>
@@ -3104,318 +3165,395 @@ export default function App() {
         onHide={() => setShowEvidenceModal(false)}
         size="xl"
         dialogClassName="evidence-detail-modal"
+        contentClassName="soc-editor-modal"
         transition={false}
         centered
       >
         <Form onSubmit={handleSaveEvidence}>
           <Modal.Header closeButton className="bg-dark border-secondary">
-            <Modal.Title className="fs-6">
-              {editingEvidenceId ? 'Edit Evidence' : 'Add Evidence'}
-            </Modal.Title>
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <Modal.Title className="fs-6 mb-0 text-white">
+                {editingEvidenceId ? 'Edit Evidence' : 'Add Evidence'}
+              </Modal.Title>
+              <Badge bg="dark" className="border border-info text-lb-cyan fw-normal">
+                {evidenceForm.evidence_type === 'ATOMIC'
+                  ? 'Atomic Event'
+                  : 'Search Result (Activity Pattern Over Time)'}
+              </Badge>
+              {evidenceForm.is_key_evidence && (
+                <Badge
+                  bg="dark"
+                  className="border border-success text-lb-lime d-inline-flex align-items-center gap-1"
+                >
+                  <Star size={12} fill="#9CEF69" color="#9CEF69" />
+                  Key Evidence
+                </Badge>
+              )}
+            </div>
           </Modal.Header>
-          <Modal.Body className="bg-dark">
-            <Row className="g-3">
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">Evidence Type</Form.Label>
-                  <Form.Select
-                    value={evidenceForm.evidence_type}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, evidence_type: e.target.value })
-                    }
-                  >
-                    <option value="ATOMIC">Atomic Event</option>
-                    <option value="SEARCH">Search Result (Activity Pattern Over Time)</option>
-                  </Form.Select>
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">Analyst</Form.Label>
-                  <Form.Control
-                    type="text"
-                    list="soc-analysts-list"
-                    value={evidenceForm.analyst_name}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, analyst_name: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-
-              <Col md={evidenceForm.evidence_type === 'SEARCH' ? 6 : 12}>
-                <Form.Group>
-                  <Form.Label className="small">
-                    {evidenceForm.evidence_type === 'SEARCH'
-                      ? 'Start Timestamp (UTC)'
-                      : 'Timestamp (UTC)'}
-                  </Form.Label>
-                  <Form.Control
-                    type="datetime-local"
-                    step="1"
-                    value={evidenceForm.timestamp}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, timestamp: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-              {evidenceForm.evidence_type === 'SEARCH' && (
+          <Modal.Body className="bg-dark text-light d-flex flex-column gap-3">
+            {/* Top Metadata Grid (matches Evidence Item Details top box) */}
+            <div className="p-3 soc-subbox">
+              <Row className="g-3">
                 <Col md={6}>
                   <Form.Group>
-                    <Form.Label className="small">End Timestamp (UTC)</Form.Label>
+                    <Form.Label className="small text-secondary mb-1">Evidence Type</Form.Label>
+                    <Form.Select
+                      value={evidenceForm.evidence_type}
+                      onChange={(e) =>
+                        setEvidenceForm({ ...evidenceForm, evidence_type: e.target.value })
+                      }
+                    >
+                      <option value="ATOMIC">Atomic Event</option>
+                      <option value="SEARCH">Search Result (Activity Pattern Over Time)</option>
+                    </Form.Select>
+                  </Form.Group>
+                </Col>
+                <Col md={6}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Analyst</Form.Label>
+                    <Form.Control
+                      type="text"
+                      list="soc-analysts-list"
+                      value={evidenceForm.analyst_name}
+                      onChange={(e) =>
+                        setEvidenceForm({ ...evidenceForm, analyst_name: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+
+                <Col md={evidenceForm.evidence_type === 'SEARCH' ? 6 : 12}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      {evidenceForm.evidence_type === 'SEARCH'
+                        ? 'Start Timestamp (UTC)'
+                        : 'Timestamp (UTC)'}
+                    </Form.Label>
                     <Form.Control
                       type="datetime-local"
                       step="1"
-                      value={evidenceForm.end_timestamp}
+                      className="mono-text"
+                      value={evidenceForm.timestamp}
                       onChange={(e) =>
-                        setEvidenceForm({ ...evidenceForm, end_timestamp: e.target.value })
+                        setEvidenceForm({ ...evidenceForm, timestamp: e.target.value })
                       }
                     />
                   </Form.Group>
                 </Col>
-              )}
-
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">Affected Asset</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={evidenceForm.affected_asset}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, affected_asset: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">Affected User</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={evidenceForm.affected_user}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, affected_user: e.target.value })
-                    }
-                  />
-                  <Form.Check
-                    type="checkbox"
-                    id="attacker-created-user-check"
-                    className="mt-1 small text-secondary"
-                    label="Created by attacker"
-                    checked={evidenceForm.user_created_by_attacker}
-                    onChange={(e) =>
-                      setEvidenceForm({
-                        ...evidenceForm,
-                        user_created_by_attacker: e.target.checked,
-                      })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-
-              <Col md={12}>
-                <Form.Group>
-                  <Form.Label className="small">Summary of Evidence</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={2}
-                    value={evidenceForm.summary}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, summary: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-
-              <Col md={12}>
-                <Form.Group>
-                  <Form.Label className="small">
-                    Malicious Hosts / IPs / Domains Involved
-                  </Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={evidenceForm.malicious_hosts_ips}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, malicious_hosts_ips: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-
-              <Col md={12}>
-                <Form.Group>
-                  <Form.Label className="small">Commands Run</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={2}
-                    className="mono-text"
-                    value={evidenceForm.commands_run}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, commands_run: e.target.value })
-                    }
-                  />
-                </Form.Group>
-              </Col>
-
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">MITRE Tactics (Multi-Select)</Form.Label>
-                  <MitreTacticsSelect
-                    value={evidenceForm.mitre_tactic}
-                    onChange={(nextTactics) =>
-                      setEvidenceForm((prev) => ({ ...prev, mitre_tactic: nextTactics }))
-                    }
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group>
-                  <Form.Label className="small">MITRE Techniques (Multi-Select)</Form.Label>
-                  <MitreTechniquesSelect
-                    tacticValue={evidenceForm.mitre_tactic}
-                    value={evidenceForm.mitre_technique}
-                    onChange={(nextTechniques) =>
-                      setEvidenceForm((prev) => ({ ...prev, mitre_technique: nextTechniques }))
-                    }
-                    onAutoAddTactic={(nextTactics) =>
-                      setEvidenceForm((prev) => ({ ...prev, mitre_tactic: nextTactics }))
-                    }
-                  />
-                </Form.Group>
-              </Col>
-
-              {evidenceForm.evidence_type === 'ATOMIC' ? (
-                <Col md={12}>
-                  <Form.Group>
-                    <Form.Label className="small">Link to Related Log / IDS Event</Form.Label>
-                    <Form.Control
-                      type="text"
-                      value={evidenceForm.related_log_link}
-                      onChange={(e) =>
-                        setEvidenceForm({ ...evidenceForm, related_log_link: e.target.value })
-                      }
-                    />
-                  </Form.Group>
-                </Col>
-              ) : (
-                <>
+                {evidenceForm.evidence_type === 'SEARCH' && (
                   <Col md={6}>
                     <Form.Group>
-                      <Form.Label className="small">Search Result Link</Form.Label>
+                      <Form.Label className="small text-secondary mb-1">
+                        End Timestamp (UTC)
+                      </Form.Label>
                       <Form.Control
-                        type="text"
-                        value={evidenceForm.search_result_link}
+                        type="datetime-local"
+                        step="1"
+                        className="mono-text"
+                        value={evidenceForm.end_timestamp}
                         onChange={(e) =>
-                          setEvidenceForm({
-                            ...evidenceForm,
-                            search_result_link: e.target.value,
-                          })
+                          setEvidenceForm({ ...evidenceForm, end_timestamp: e.target.value })
                         }
                       />
                     </Form.Group>
-                  </Col>
-                  <Col md={6}>
-                    <Form.Group>
-                      <Form.Label className="small">Search Query Link</Form.Label>
-                      <Form.Control
-                        type="text"
-                        value={evidenceForm.search_query_link}
-                        onChange={(e) =>
-                          setEvidenceForm({
-                            ...evidenceForm,
-                            search_query_link: e.target.value,
-                          })
-                        }
-                      />
-                    </Form.Group>
-                  </Col>
-                </>
-              )}
-
-              <Col md={12}>
-                <Form.Group>
-                  <Form.Label className="small">Freeform Notes</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={2}
-                    value={evidenceForm.notes}
-                    onChange={(e) => setEvidenceForm({ ...evidenceForm, notes: e.target.value })}
-                  />
-                </Form.Group>
-              </Col>
-
-              {/* Existing Attached Screenshots when Editing */}
-              {currentlyEditingItem &&
-                currentlyEditingItem.screenshots &&
-                currentlyEditingItem.screenshots.length > 0 && (
-                  <Col md={12}>
-                    <div className="small mb-2">Attached Screenshots</div>
-                    <div className="d-flex flex-wrap gap-3 p-2 soc-subbox">
-                      {currentlyEditingItem.screenshots.map((shot) => (
-                        <div key={shot.id} className="d-flex align-items-center gap-2">
-                          <img
-                            src={shot.image_url}
-                            alt={shot.caption || shot.filename}
-                            className="screenshot-thumb"
-                            onClick={() => setPreviewScreenshot(shot)}
-                          />
-                          {canUserDeleteScreenshot(shot) && (
-                            <Button
-                              variant="outline-danger"
-                              size="sm"
-                              onClick={() => requestDeleteScreenshot(shot)}
-                            >
-                              <Trash2 size={13} className="me-1" />
-                              Delete
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                   </Col>
                 )}
 
-              <Col md={7}>
-                <Form.Group>
-                  <Form.Label className="small">Add Screenshots</Form.Label>
-                  <Form.Control
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={(e) => setScreenshotFiles(Array.from(e.target.files || []))}
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={5}>
-                <Form.Group>
-                  <Form.Label className="small">Screenshot Caption</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={screenshotCaption}
-                    onChange={(e) => setScreenshotCaption(e.target.value)}
-                  />
-                </Form.Group>
-              </Col>
+                <Col md={6}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Affected Asset</Form.Label>
+                    <Form.Control
+                      type="text"
+                      className="mono-text"
+                      value={evidenceForm.affected_asset}
+                      onChange={(e) =>
+                        setEvidenceForm({ ...evidenceForm, affected_asset: e.target.value })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={6}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Affected User</Form.Label>
+                    <Form.Control
+                      type="text"
+                      className="mono-text"
+                      value={evidenceForm.affected_user}
+                      onChange={(e) =>
+                        setEvidenceForm({ ...evidenceForm, affected_user: e.target.value })
+                      }
+                    />
+                    <Form.Check
+                      type="checkbox"
+                      id="attacker-created-user-check"
+                      className="mt-1 small text-secondary"
+                      label="Created by attacker"
+                      checked={evidenceForm.user_created_by_attacker}
+                      onChange={(e) =>
+                        setEvidenceForm({
+                          ...evidenceForm,
+                          user_created_by_attacker: e.target.checked,
+                        })
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+              </Row>
+            </div>
 
-              <Col md={12}>
-                <Form.Check
-                  type="switch"
-                  id="key-evidence-flag-modal"
-                  label="Flag as Key Evidence for Report"
-                  checked={evidenceForm.is_key_evidence}
+            {/* Summary & Analyst Notes (matches Evidence Item Details cards) */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">Summary of Evidence</div>
+              <Form.Group>
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  value={evidenceForm.summary}
                   onChange={(e) =>
-                    setEvidenceForm({ ...evidenceForm, is_key_evidence: e.target.checked })
+                    setEvidenceForm({ ...evidenceForm, summary: e.target.value })
                   }
                 />
-              </Col>
-            </Row>
+              </Form.Group>
+            </div>
+
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">Analyst Notes</div>
+              <Form.Group>
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  value={evidenceForm.notes}
+                  onChange={(e) => setEvidenceForm({ ...evidenceForm, notes: e.target.value })}
+                />
+              </Form.Group>
+            </div>
+
+            {/* Malicious Indicators & Commands Run */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">
+                Malicious Hosts / IPs / Domains Involved
+              </div>
+              <Form.Group>
+                <Form.Control
+                  type="text"
+                  className="mono-text"
+                  value={evidenceForm.malicious_hosts_ips}
+                  onChange={(e) =>
+                    setEvidenceForm({ ...evidenceForm, malicious_hosts_ips: e.target.value })
+                  }
+                />
+              </Form.Group>
+            </div>
+
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">Commands Run</div>
+              <Form.Group>
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  className="mono-text"
+                  value={evidenceForm.commands_run}
+                  onChange={(e) =>
+                    setEvidenceForm({ ...evidenceForm, commands_run: e.target.value })
+                  }
+                />
+              </Form.Group>
+            </div>
+
+            {/* MITRE ATT&CK Tactics & Techniques */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">
+                MITRE ATT&amp;CK Tactics &amp; Techniques
+              </div>
+              <Row className="g-3">
+                <Col md={5} style={{ minWidth: 0 }}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Tactics (Multi-Select)
+                    </Form.Label>
+                    <MitreTacticsSelect
+                      value={evidenceForm.mitre_tactic}
+                      onChange={(nextTactics) =>
+                        setEvidenceForm((prev) => ({ ...prev, mitre_tactic: nextTactics }))
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={7} style={{ minWidth: 0 }}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Techniques (Multi-Select)
+                    </Form.Label>
+                    <MitreTechniquesSelect
+                      tacticValue={evidenceForm.mitre_tactic}
+                      value={evidenceForm.mitre_technique}
+                      onChange={(nextTechniques) =>
+                        setEvidenceForm((prev) => ({ ...prev, mitre_technique: nextTechniques }))
+                      }
+                      onAutoAddTactic={(nextTactics) =>
+                        setEvidenceForm((prev) => ({ ...prev, mitre_tactic: nextTactics }))
+                      }
+                    />
+                  </Form.Group>
+                </Col>
+              </Row>
+            </div>
+
+            {/* Evidence & SIEM Links */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2">Evidence &amp; SIEM Links</div>
+              <Row className="g-3">
+                {evidenceForm.evidence_type === 'ATOMIC' ? (
+                  <Col md={12}>
+                    <Form.Group>
+                      <Form.Label className="small text-secondary mb-1">
+                        Link to Related Log / IDS Event
+                      </Form.Label>
+                      <Form.Control
+                        type="text"
+                        className="mono-text"
+                        value={evidenceForm.related_log_link}
+                        onChange={(e) =>
+                          setEvidenceForm({ ...evidenceForm, related_log_link: e.target.value })
+                        }
+                      />
+                    </Form.Group>
+                  </Col>
+                ) : (
+                  <>
+                    <Col md={6}>
+                      <Form.Group>
+                        <Form.Label className="small text-secondary mb-1">
+                          Search Result Link
+                        </Form.Label>
+                        <Form.Control
+                          type="text"
+                          className="mono-text"
+                          value={evidenceForm.search_result_link}
+                          onChange={(e) =>
+                            setEvidenceForm({
+                              ...evidenceForm,
+                              search_result_link: e.target.value,
+                            })
+                          }
+                        />
+                      </Form.Group>
+                    </Col>
+                    <Col md={6}>
+                      <Form.Group>
+                        <Form.Label className="small text-secondary mb-1">
+                          Search Query Link
+                        </Form.Label>
+                        <Form.Control
+                          type="text"
+                          className="mono-text"
+                          value={evidenceForm.search_query_link}
+                          onChange={(e) =>
+                            setEvidenceForm({
+                              ...evidenceForm,
+                              search_query_link: e.target.value,
+                            })
+                          }
+                        />
+                      </Form.Group>
+                    </Col>
+                  </>
+                )}
+              </Row>
+            </div>
+
+            {/* Screenshots & Key Evidence Flag */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2 d-flex align-items-center gap-1">
+                <ImageIcon size={14} />
+                <span>
+                  Screenshots
+                  {currentlyEditingItem?.screenshots?.length
+                    ? ` (${currentlyEditingItem.screenshots.length})`
+                    : ''}
+                </span>
+              </div>
+
+              {currentlyEditingItem &&
+                currentlyEditingItem.screenshots &&
+                currentlyEditingItem.screenshots.length > 0 && (
+                  <div className="d-flex flex-wrap gap-3 mb-3">
+                    {currentlyEditingItem.screenshots.map((shot) => (
+                      <div
+                        key={shot.id}
+                        className="p-2 rounded border border-secondary bg-dark d-flex align-items-center gap-2"
+                      >
+                        <img
+                          src={shot.image_url}
+                          alt={shot.caption || shot.filename}
+                          className="screenshot-thumb"
+                          onClick={() => setPreviewScreenshot(shot)}
+                        />
+                        {canUserDeleteScreenshot(shot) && (
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={() => requestDeleteScreenshot(shot)}
+                          >
+                            <Trash2 size={13} className="me-1" />
+                            Delete
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              <Row className="g-3">
+                <Col md={7}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">Add Screenshots</Form.Label>
+                    <Form.Control
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      onChange={(e) => setScreenshotFiles(Array.from(e.target.files || []))}
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={5}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Screenshot Caption
+                    </Form.Label>
+                    <Form.Control
+                      type="text"
+                      value={screenshotCaption}
+                      onChange={(e) => setScreenshotCaption(e.target.value)}
+                    />
+                  </Form.Group>
+                </Col>
+
+                <Col md={12}>
+                  <Form.Check
+                    type="switch"
+                    id="key-evidence-flag-modal"
+                    className="small text-light pt-1"
+                    label="Flag as Key Evidence for Report"
+                    checked={evidenceForm.is_key_evidence}
+                    onChange={(e) =>
+                      setEvidenceForm({ ...evidenceForm, is_key_evidence: e.target.checked })
+                    }
+                  />
+                </Col>
+              </Row>
+            </div>
           </Modal.Body>
           <Modal.Footer className="bg-dark border-secondary">
-            <Button variant="outline-secondary" onClick={() => setShowEvidenceModal(false)}>
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => setShowEvidenceModal(false)}
+            >
               Cancel
             </Button>
-            <Button className="btn-lb-primary" type="submit">
+            <Button className="btn-lb-primary" size="sm" type="submit">
               Save Evidence
             </Button>
           </Modal.Footer>

@@ -4,6 +4,33 @@ A full-stack SOC investigation management, chronological evidence timeline const
 
 ---
 
+## Screenshots & Example Reports (`samples/`)
+
+The [`samples/`](samples/) directory includes UI walkthrough screenshots as well as **example exported investigation reports** generated directly from the tool:
+
+- **Example Full Timeline CSV Report**: [`samples/2026-10-30_CUST-19990_SOC-2026-0101_3.csv`](samples/2026-10-30_CUST-19990_SOC-2026-0101_3.csv)
+- **Example Key Evidence OpenDocument (`.odt`) Report**: [`samples/2026-10-30_CUST-19990_SOC-2026-0101_3.odt`](samples/2026-10-30_CUST-19990_SOC-2026-0101_3.odt)
+
+### SOC Investigation Overview (Homepage)
+![SOC Investigation Overview Homepage](samples/01-soc-investigation-overview.png)
+
+### Investigation Workspace — Overview Tab
+![Investigation Workspace Overview](samples/02-investigation-workspace-overview.png)
+
+### Investigation Workspace — Evidence Timeline Tab
+![Evidence Timeline Tab](samples/03-evidence-timeline.png)
+
+### Evidence Item Details Popup (Key Evidence & Attached Screenshot)
+![Evidence Item Details Popup with Screenshot](samples/04-evidence-item-details-key.png)
+
+### Evidence Item Details Popup (Defanged Command & MITRE ATT&CK Mappings)
+![Evidence Item Details Popup Commands](samples/05-evidence-item-details-commands.png)
+
+### Investigation Workspace — Report Generation & Live Preview
+![Report Generation and Key Evidence Report Preview](samples/06-report-generation-preview.png)
+
+---
+
 ## Technology Stack & Pinned Versions
 
 - **Backend**: Python (`>=3.10`) + **Django `5.1.14`** + Django Built-In Authentication (`django.contrib.auth`) + Django REST Framework (`3.17.2`) + `django-cors-headers` (`4.9.0`) + `odfpy` (`1.4.1`) + `Pillow` (`13.0.0`) + `gunicorn` (`23.0.0`)
