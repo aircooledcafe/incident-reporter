@@ -1,6 +1,35 @@
 # SOC Investigations
 
-A full-stack SOC investigation management, chronological evidence timeline construction, role-based access control, and investigation reporting application.
+A tool for SOC analysts to manage security incidents — allowing them to collect evidence, build chronological timelines, and generate investigation report outlines.
+
+---
+
+## Quick Start
+
+### Option A: Docker Compose (Recommended)
+```bash
+git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
+cd incident-reporter
+
+cp .env.example .env
+# Generate and write DJANGO_SECRET_KEY into .env:
+python3 -c 'import pathlib, secrets; p=pathlib.Path(".env"); p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={secrets.token_urlsafe(50)}"))'
+
+docker compose up -d --build
+```
+Open **`http://localhost:5173`** in your browser. On first launch, you will be prompted to create the initial **Super Admin** account.
+
+### Option B: Local Run (Python + Node.js)
+```bash
+cp .env.example .env
+python3 -c 'import pathlib, secrets; p=pathlib.Path(".env"); p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={secrets.token_urlsafe(50)}"))'
+
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
+cd frontend && npm install --legacy-peer-deps && cd ..
+
+./start.sh
+```
+Open **`http://localhost:5173`** (`http://localhost:8000` for the backend API).
 
 ---
 
