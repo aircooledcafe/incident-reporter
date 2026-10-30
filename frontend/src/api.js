@@ -210,6 +210,17 @@ export const api = {
       method: 'DELETE',
     }),
 
+  // PCAP Packet Captures
+  uploadPcap: (formData) =>
+    request('/pcaps/', {
+      method: 'POST',
+      body: formData,
+    }),
+  deletePcap: (id) =>
+    request(`/pcaps/${id}/`, {
+      method: 'DELETE',
+    }),
+
   // Related Escalated Incidents
   addRelatedIncident: (data) =>
     request('/related-incidents/', {

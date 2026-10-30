@@ -251,11 +251,15 @@ def generate_timeline_csv(project) -> tuple[str, Path]:
         "MITRE Technique",
         "Evidence Links",
         "Screenshots",
+        "PCAPs",
     ])
 
     for idx, item in enumerate(evidence_items, start=1):
         screenshot_names = ", ".join(
             [os.path.basename(s.image.name) for s in item.screenshots.all()]
+        )
+        pcap_names = ", ".join(
+            [os.path.basename(p.file.name) for p in item.pcaps.all()]
         )
         links_str = " | ".join(_collect_links(item))
         writer.writerow([
@@ -276,6 +280,7 @@ def generate_timeline_csv(project) -> tuple[str, Path]:
             item.mitre_technique,
             links_str,
             screenshot_names,
+            pcap_names,
         ])
 
     csv_content = output.getvalue()
@@ -483,6 +488,16 @@ def generate_key_evidence_odt(project) -> tuple[bytes, Path]:
             else:
                 add_line("Screenshot", "None")
 
+            # Attached PCAPs (if present)
+            pcaps = list(item.pcaps.all())
+            if pcaps:
+                pcap_labels = [
+                    f"{os.path.basename(p.file.name)}"
+                    + (f" ({p.description})" if p.description else "")
+                    for p in pcaps
+                ]
+                add_line("PCAPs", ", ".join(pcap_labels))
+
             # Links (NOT defanged)
             links = _collect_links(item)
             if links:
@@ -555,6 +570,8 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     screenshots_subdir_name = f"key_evidence_screenshots_investigation_{project.pk}"
     screenshots_dir = reports_dir / screenshots_subdir_name
     screenshots_dir.mkdir(parents=True, exist_ok=True)
+    pcaps_subdir_name = f"key_evidence_pcaps_investigation_{project.pk}"
+    pcaps_dir = reports_dir / pcaps_subdir_name
 
     title_text = project.title or f"Investigation #{project.pk}"
     lines = [
@@ -572,6 +589,7 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     key_items = [item for item in all_items if item.is_key_evidence]
 
     copied_files: list[Path] = []
+    copied_pcap_files: list[Path] = []
 
     if not key_items:
         lines.append("No items flagged as Key Evidence.")
@@ -615,6 +633,21 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
             else:
                 lines.append("None")
             lines.append("")
+
+            pcaps = list(item.pcaps.all())
+            if pcaps:
+                pcaps_dir.mkdir(parents=True, exist_ok=True)
+                lines.append("**PCAPs:**")
+                for pcap in pcaps:
+                    src_path = Path(pcap.file.path)
+                    safe_name = os.path.basename(pcap.file.name)
+                    dest_path = pcaps_dir / safe_name
+                    if src_path.exists():
+                        shutil.copy2(src_path, dest_path)
+                        copied_pcap_files.append(dest_path)
+                    label = f"{safe_name} — {pcap.description}" if pcap.description else safe_name
+                    lines.append(f"- [{label}](./{pcaps_subdir_name}/{safe_name})")
+                lines.append("")
 
             links = _collect_links(item)
             lines.append("**Links:**")
@@ -681,6 +714,8 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
         zf.writestr(report_path.name, md_content)
         for file_path in copied_files:
             zf.write(file_path, arcname=f"{screenshots_subdir_name}/{file_path.name}")
+        for pcap_path in copied_pcap_files:
+            zf.write(pcap_path, arcname=f"{pcaps_subdir_name}/{pcap_path.name}")
     zip_bytes = zip_buf.getvalue()
     zip_filename = build_investigation_report_filename(project, "zip")
     zip_path = reports_dir / zip_filename

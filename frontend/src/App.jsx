@@ -38,6 +38,8 @@ import {
   Sparkles,
   Settings,
   Image as ImageIcon,
+  Network,
+  Download,
 } from 'lucide-react';
 import { api } from './api';
 import HomeDashboard from './HomeDashboard';
@@ -280,6 +282,8 @@ export default function App() {
   const [evidenceForm, setEvidenceForm] = useState(EMPTY_EVIDENCE_FORM);
   const [screenshotFiles, setScreenshotFiles] = useState([]);
   const [screenshotCaption, setScreenshotCaption] = useState('');
+  const [pcapFiles, setPcapFiles] = useState([]);
+  const [pcapDescription, setPcapDescription] = useState('');
 
   // External research form state
   const [researchLink, setResearchLink] = useState('');
@@ -289,6 +293,7 @@ export default function App() {
   const [detailEvidenceId, setDetailEvidenceId] = useState(null);
   const [deleteTargetEvidence, setDeleteTargetEvidence] = useState(null);
   const [deleteTargetScreenshot, setDeleteTargetScreenshot] = useState(null);
+  const [deleteTargetPcap, setDeleteTargetPcap] = useState(null);
   const [previewScreenshot, setPreviewScreenshot] = useState(null);
 
   // Timeline filters
@@ -813,6 +818,8 @@ export default function App() {
     });
     setScreenshotFiles([]);
     setScreenshotCaption('');
+    setPcapFiles([]);
+    setPcapDescription('');
     setShowEvidenceModal(true);
   };
 
@@ -839,6 +846,8 @@ export default function App() {
     });
     setScreenshotFiles([]);
     setScreenshotCaption('');
+    setPcapFiles([]);
+    setPcapDescription('');
     setShowEvidenceModal(true);
   };
 
@@ -880,6 +889,11 @@ export default function App() {
       for (const file of screenshotFiles) {
         formData.append('screenshots_upload', file);
         formData.append('screenshot_captions', screenshotCaption || file.name);
+      }
+
+      for (const pFile of pcapFiles) {
+        formData.append('pcaps_upload', pFile);
+        formData.append('pcap_descriptions', pcapDescription || '');
       }
 
       if (editingEvidenceId) {
@@ -963,6 +977,33 @@ export default function App() {
     } catch (err) {
       setDeleteTargetScreenshot(null);
       handleApiError(err, 'Failed to delete screenshot');
+    }
+  };
+
+  const canUserDeletePcap = (pcap) => {
+    if (!pcap || !canModifyActiveProject) return false;
+    if (typeof pcap.can_actor_delete === 'boolean') {
+      return pcap.can_actor_delete;
+    }
+    return Boolean(canLockProjects || (authUser && pcap.created_by === authUser.id));
+  };
+
+  const requestDeletePcap = (pcap) => {
+    if (!canUserDeletePcap(pcap)) return;
+    setDeleteTargetPcap(pcap);
+  };
+
+  const handleConfirmDeletePcap = async () => {
+    if (!activeProject || !deleteTargetPcap) return;
+    const pcapId = deleteTargetPcap.id;
+    try {
+      await api.deletePcap(pcapId);
+      setDeleteTargetPcap(null);
+      await handleSelectProject(activeProject.id);
+      notifySuccess('PCAP capture deleted from event.');
+    } catch (err) {
+      setDeleteTargetPcap(null);
+      handleApiError(err, 'Failed to delete PCAP');
     }
   };
 
@@ -2666,6 +2707,24 @@ export default function App() {
                                         )}
                                       </div>
 
+                                      {item.pcaps && item.pcaps.length > 0 && (
+                                        <div className="small mb-2">
+                                          <strong>PCAPs:</strong>{' '}
+                                          {item.pcaps.map((pcap, idx) => (
+                                            <React.Fragment key={pcap.id}>
+                                              {idx > 0 && ', '}
+                                              <a
+                                                href={pcap.download_url || pcap.file_url}
+                                                className="text-lb-cyan mono-text text-decoration-none"
+                                              >
+                                                {pcap.filename}
+                                                {pcap.description ? ` (${pcap.description})` : ''}
+                                              </a>
+                                            </React.Fragment>
+                                          ))}
+                                        </div>
+                                      )}
+
                                       <div className="small">
                                         <strong>Links:</strong>{' '}
                                         {links.length > 0 ? (
@@ -3529,6 +3588,93 @@ export default function App() {
                     />
                   </Form.Group>
                 </Col>
+              </Row>
+            </div>
+
+            {/* Packet Captures (PCAP) & Key Evidence Flag */}
+            <div className="p-3 soc-subbox">
+              <div className="small fw-semibold text-lb-cyan mb-2 d-flex align-items-center gap-1">
+                <Network size={14} />
+                <span>
+                  Packet Captures / PCAPs
+                  {currentlyEditingItem?.pcaps?.length
+                    ? ` (${currentlyEditingItem.pcaps.length})`
+                    : ''}
+                </span>
+              </div>
+
+              {currentlyEditingItem &&
+                currentlyEditingItem.pcaps &&
+                currentlyEditingItem.pcaps.length > 0 && (
+                  <div className="d-flex flex-column gap-2 mb-3">
+                    {currentlyEditingItem.pcaps.map((pcap) => (
+                      <div
+                        key={pcap.id}
+                        className="p-2 px-3 rounded border border-secondary bg-dark d-flex flex-wrap justify-content-between align-items-center gap-2"
+                      >
+                        <div className="text-break">
+                          <div className="mono-text text-white small fw-semibold">
+                            {pcap.filename}
+                          </div>
+                          {pcap.description && (
+                            <div className="text-secondary" style={{ fontSize: '0.75rem' }}>
+                              {pcap.description}
+                            </div>
+                          )}
+                        </div>
+                        <div className="d-flex align-items-center gap-2">
+                          <Button
+                            as="a"
+                            href={pcap.download_url || pcap.file_url}
+                            className="btn-lb-cyan"
+                            size="sm"
+                          >
+                            <Download size={13} className="me-1" />
+                            Download
+                          </Button>
+                          {canUserDeletePcap(pcap) && (
+                            <Button
+                              variant="outline-danger"
+                              size="sm"
+                              onClick={() => requestDeletePcap(pcap)}
+                            >
+                              <Trash2 size={13} className="me-1" />
+                              Delete
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              <Row className="g-3">
+                <Col md={7}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      Attach PCAP File(s) (.pcap, .pcapng, .cap)
+                    </Form.Label>
+                    <Form.Control
+                      type="file"
+                      multiple
+                      accept=".pcap,.pcapng,.cap,application/vnd.tcpdump.pcap,application/octet-stream"
+                      onChange={(e) => setPcapFiles(Array.from(e.target.files || []))}
+                    />
+                  </Form.Group>
+                </Col>
+                <Col md={5}>
+                  <Form.Group>
+                    <Form.Label className="small text-secondary mb-1">
+                      PCAP Description (Optional)
+                    </Form.Label>
+                    <Form.Control
+                      type="text"
+                      placeholder="e.g. C2 HTTPS beacon capture on eth0"
+                      value={pcapDescription}
+                      onChange={(e) => setPcapDescription(e.target.value)}
+                    />
+                  </Form.Group>
+                </Col>
 
                 <Col md={12}>
                   <Form.Check
@@ -3569,11 +3715,13 @@ export default function App() {
         canModifyActiveProject={canModifyActiveProject}
         canDeleteItem={canUserDeleteEvidenceItem(detailEvidenceItem)}
         canDeleteScreenshot={canUserDeleteScreenshot}
+        canDeletePcap={canUserDeletePcap}
         onToggleKey={handleToggleKeyEvidence}
         onEdit={openEditEvidenceModal}
         onDelete={requestDeleteEvidence}
         onPreviewScreenshot={(shot) => setPreviewScreenshot(shot)}
         onDeleteScreenshot={requestDeleteScreenshot}
+        onDeletePcap={requestDeletePcap}
       />
 
       {/* Warning Modal: Confirm Deleting a Timeline Evidence Item */}
@@ -3604,8 +3752,8 @@ export default function App() {
             </div>
           )}
           <p className="text-secondary mb-0">
-            This will permanently remove the event and any attached screenshots from the
-            investigation timeline. This action cannot be undone.
+            This will permanently remove the event and any attached screenshots or PCAP files from
+            the investigation timeline. This action cannot be undone.
           </p>
         </Modal.Body>
         <Modal.Footer className="bg-dark border-secondary">
@@ -3717,6 +3865,52 @@ export default function App() {
           </Button>
           <Button variant="danger" size="sm" onClick={handleConfirmDeleteScreenshot}>
             Delete Screenshot
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Warning Modal: Confirm Deleting an Attached PCAP */}
+      <Modal
+        show={Boolean(deleteTargetPcap)}
+        onHide={() => setDeleteTargetPcap(null)}
+        transition={false}
+        centered
+      >
+        <Modal.Header closeButton className="bg-dark border-danger">
+          <Modal.Title className="fs-6 d-flex align-items-center gap-2 text-danger">
+            <AlertTriangle size={18} />
+            <span>Confirm PCAP Deletion</span>
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="bg-dark text-light small">
+          <p className="mb-2">
+            Are you sure you want to permanently delete this attached PCAP file?
+          </p>
+          {deleteTargetPcap && (
+            <div className="p-2 px-3 mb-2 soc-subbox text-break">
+              <div className="mono-text text-lb-cyan fw-semibold">
+                {deleteTargetPcap.filename}
+              </div>
+              {deleteTargetPcap.description && (
+                <div className="text-secondary mt-1">{deleteTargetPcap.description}</div>
+              )}
+            </div>
+          )}
+          <p className="text-secondary mb-0">
+            This will permanently remove the PCAP file from the investigation artifacts folder.
+            This action cannot be undone.
+          </p>
+        </Modal.Body>
+        <Modal.Footer className="bg-dark border-secondary">
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => setDeleteTargetPcap(null)}
+          >
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={handleConfirmDeletePcap}>
+            Delete PCAP
           </Button>
         </Modal.Footer>
       </Modal>

@@ -188,6 +188,32 @@ def assert_can_delete_screenshot(user, screenshot) -> None:
         )
 
 
+def can_user_delete_pcap(user, pcap) -> bool:
+    """
+    Attached PCAP captures can only be deleted (on an unlocked investigation) by the user
+    who uploaded the PCAP (falling back to the parent evidence creator) or by an Admin / Super Admin.
+    """
+    if not user or not user.is_authenticated or not user.is_active:
+        return False
+    evidence = getattr(pcap, 'evidence', None)
+    project = getattr(evidence, 'project', None) if evidence else None
+    if project and project.is_locked:
+        return False
+    if is_admin_or_super(user):
+        return True
+    if not can_write_investigations(user):
+        return False
+    owner_id = pcap.created_by_id or (evidence.created_by_id if evidence else None)
+    return bool(owner_id and owner_id == user.pk)
+
+
+def assert_can_delete_pcap(user, pcap) -> None:
+    if not can_user_delete_pcap(user, pcap):
+        raise PermissionDenied(
+            "Only the user who uploaded this PCAP, an Admin, or a Super Admin can delete it."
+        )
+
+
 class ProjectAccessPermission(permissions.BasePermission):
     """
     - demo_scenarios / seed_demo: SUPER_ADMIN only.

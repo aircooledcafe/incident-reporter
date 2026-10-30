@@ -957,3 +957,96 @@ class IncidentReporterTests(TestCase):
         # Super Admin CAN delete screenshots uploaded by another user
         self.client.force_authenticate(user=self.super_admin)
         self.assertEqual(self.client.delete(f"/api/screenshots/{shot_c['id']}/").status_code, 204)
+
+    def test_pcap_attachment_storage_in_artifacts_folder_reports_and_permissions(self):
+        analyst_two = create_user_with_role(
+            "analyst2_pcap", "Str0ngAnalyst2Pass!99", UserProfile.ROLE_ANALYST,
+            first_name="Alex", last_name="Kamal",
+        )
+
+        # Minimal valid 24-byte libpcap global header
+        pcap_bytes = bytes.fromhex("d4c3b2a1020004000000000000000000ffff000001000000")
+
+        def make_pcap_upload(name: str) -> SimpleUploadedFile:
+            return SimpleUploadedFile(name, pcap_bytes, content_type="application/vnd.tcpdump.pcap")
+
+        self.client.force_authenticate(user=self.analyst_user)
+        proj_res = self.client.post(
+            "/api/projects/",
+            {"title": "PCAP Capture Investigation", "customer_id": "CUST-909"},
+            format="json",
+        )
+        self.assertEqual(proj_res.status_code, 201)
+        proj_data = proj_res.json()
+        proj_id = proj_data["id"]
+        artifact_folder = proj_data["artifact_folder"]
+
+        ev_res = self.client.post(
+            "/api/evidence/",
+            {
+                "project": proj_id,
+                "summary": "Outbound C2 beacon captured in PCAP",
+                "is_key_evidence": "true",
+                "pcaps_upload": [
+                    make_pcap_upload("c2_beacon.pcap"),
+                    make_pcap_upload("dns_tunnel.pcapng"),
+                ],
+                "pcap_descriptions": ["HTTPS C2 beacon on eth0", "DNS tunneling stream"],
+            },
+            format="multipart",
+        )
+        self.assertEqual(ev_res.status_code, 201)
+        pcaps = ev_res.json()["pcaps"]
+        self.assertEqual(len(pcaps), 2)
+        pcap_a, pcap_b = pcaps
+        self.assertEqual(pcap_a["created_by"], self.analyst_user.id)
+        self.assertEqual(pcap_a["file_size"], len(pcap_bytes))
+        self.assertTrue(pcap_a["can_actor_delete"])
+
+        # Verify PCAPs are stored inside artifacts/<project_folder>/pcaps/ alongside screenshots & reports
+        pcap_dir = Path(self.temp_artifacts_dir) / artifact_folder / "pcaps"
+        self.assertTrue(pcap_dir.is_dir())
+        stored_pcap_path = pcap_dir / pcap_a["filename"]
+        self.assertTrue(stored_pcap_path.is_file())
+        self.assertEqual(stored_pcap_path.read_bytes(), pcap_bytes)
+
+        # Verify archive_manifest.json includes the attached PCAP paths
+        manifest_path = Path(self.temp_artifacts_dir) / artifact_folder / "archive_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(manifest["evidence_timeline"][0]["pcaps"]), 2)
+
+        # Unauthenticated download of PCAP must return 401; authenticated ?download=1 returns attachment
+        anon_client = APIClient()
+        self.assertEqual(anon_client.get(pcap_a["download_url"]).status_code, 401)
+
+        session_client = APIClient()
+        session_client.login(username="executive1", password="Str0ngExecPass!99")
+        dl_res = session_client.get(pcap_a["download_url"])
+        self.assertEqual(dl_res.status_code, 200)
+        self.assertIn('attachment; filename="', dl_res["Content-Disposition"])
+        self.assertEqual(b"".join(dl_res.streaming_content), pcap_bytes)
+
+        # Verify CSV & Markdown ZIP bundle include PCAP references/files
+        csv_res = self.client.get(f"/api/projects/{proj_id}/report_csv/")
+        csv_rows = list(csv.reader(io.StringIO(csv_res.content.decode("utf-8"))))
+        self.assertEqual(csv_rows[0][17], "PCAPs")
+        self.assertIn(pcap_a["filename"], csv_rows[1][17])
+
+        zip_res = self.client.get(f"/api/projects/{proj_id}/report_md/?bundle=zip")
+        with zipfile.ZipFile(io.BytesIO(zip_res.content), "r") as zf:
+            names = zf.namelist()
+            self.assertTrue(any(pcap_a["filename"] in n for n in names))
+
+        # Deletion permissions: non-creator Analyst & Executive denied (403); creator & Admin allowed (204)
+        self.client.force_authenticate(user=analyst_two)
+        self.assertEqual(self.client.delete(f"/api/pcaps/{pcap_a['id']}/").status_code, 403)
+
+        self.client.force_authenticate(user=self.exec_user)
+        self.assertEqual(self.client.delete(f"/api/pcaps/{pcap_a['id']}/").status_code, 403)
+
+        self.client.force_authenticate(user=self.analyst_user)
+        self.assertEqual(self.client.delete(f"/api/pcaps/{pcap_a['id']}/").status_code, 204)
+        self.assertFalse(stored_pcap_path.exists())
+
+        self.client.force_authenticate(user=self.admin_user)
+        self.assertEqual(self.client.delete(f"/api/pcaps/{pcap_b['id']}/").status_code, 204)

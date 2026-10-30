@@ -151,11 +151,13 @@ erDiagram
     auth_user ||--o{ Project : "locks (locked_projects)"
     auth_user ||--o{ EvidenceItem : "creates (created_evidence_items)"
     auth_user ||--o{ EvidenceScreenshot : "uploads (created_evidence_screenshots)"
+    auth_user ||--o{ EvidencePcap : "uploads (created_evidence_pcaps)"
     Project ||--o{ RelatedIncident : "has many (related_incidents)"
     Project ||--o{ CustomerContact : "has many (customer_contacts)"
     Project ||--o{ ExternalResearch : "has many (external_research_items)"
     Project ||--o{ EvidenceItem : "has many (evidence_items)"
     EvidenceItem ||--o{ EvidenceScreenshot : "has many (screenshots)"
+    EvidenceItem ||--o{ EvidencePcap : "has many (pcaps)"
 
     auth_user {
         int id PK
@@ -278,6 +280,16 @@ erDiagram
         int created_by_id FK "Nullable -> auth_user (uploader)"
         file image "Stored under artifacts/<project_folder>/screenshots/"
         string caption
+        string analyst_name
+        datetime uploaded_at
+    }
+
+    EvidencePcap {
+        int id PK
+        int evidence_id FK
+        int created_by_id FK "Nullable -> auth_user (uploader)"
+        file file "Stored under artifacts/<project_folder>/pcaps/"
+        string description
         string analyst_name
         datetime uploaded_at
     }

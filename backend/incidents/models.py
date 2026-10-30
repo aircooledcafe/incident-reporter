@@ -142,6 +142,13 @@ def screenshot_upload_path(instance, filename):
     return f"{folder}/screenshots/evidence_{instance.evidence.id}_{safe_name}"
 
 
+def pcap_upload_path(instance, filename):
+    project = instance.evidence.project
+    folder = project.get_or_create_artifact_folder()
+    safe_name = os.path.basename(filename)
+    return f"{folder}/pcaps/evidence_{instance.evidence.id}_{safe_name}"
+
+
 class Project(models.Model):
     STATUS_CHOICES = [
         ('OPEN', 'Open / Triage'),
@@ -204,6 +211,7 @@ class Project(models.Model):
         folder_name = self.artifact_folder or "project_unassigned"
         base_path = Path(settings.ARTIFACTS_ROOT) / folder_name
         (base_path / "screenshots").mkdir(parents=True, exist_ok=True)
+        (base_path / "pcaps").mkdir(parents=True, exist_ok=True)
         (base_path / "reports").mkdir(parents=True, exist_ok=True)
         return folder_name
 
@@ -274,6 +282,7 @@ class Project(models.Model):
                 "analyst_name": e.analyst_name,
                 "created_by": e.created_by.username if e.created_by_id and e.created_by else None,
                 "screenshots": [s.image.name for s in e.screenshots.all()],
+                "pcaps": [p.file.name for p in e.pcaps.all()],
             }
             for e in self.get_timeline_evidence()
         ]
@@ -343,7 +352,7 @@ class Project(models.Model):
         """
         return (
             self.evidence_items.select_related('created_by')
-            .prefetch_related('screenshots__created_by')
+            .prefetch_related('screenshots__created_by', 'pcaps__created_by')
             .order_by(
                 models.F('timestamp').asc(nulls_last=True),
                 'created_at',
@@ -502,3 +511,35 @@ class EvidenceScreenshot(models.Model):
 
     def __str__(self):
         return f"Screenshot for Evidence #{self.evidence_id}"
+
+
+class EvidencePcap(models.Model):
+    evidence = models.ForeignKey(
+        EvidenceItem,
+        on_delete=models.CASCADE,
+        related_name='pcaps',
+    )
+    file = models.FileField(upload_to=pcap_upload_path)
+    description = models.CharField(max_length=512, blank=True, default="")
+    analyst_name = models.CharField(max_length=150, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_evidence_pcaps',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['uploaded_at']
+
+    def delete(self, *args, **kwargs):
+        storage = self.file.storage if self.file else None
+        name = self.file.name if self.file else None
+        super().delete(*args, **kwargs)
+        if storage and name and storage.exists(name):
+            storage.delete(name)
+
+    def __str__(self):
+        return f"PCAP for Evidence #{self.evidence_id}"

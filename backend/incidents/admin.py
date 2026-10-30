@@ -10,6 +10,7 @@ from .models import (
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
+    EvidencePcap,
 )
 from .permissions import is_super_admin
 
@@ -79,3 +80,4 @@ admin.site.register(CustomerContact)
 admin.site.register(ExternalResearch)
 admin.site.register(EvidenceItem)
 admin.site.register(EvidenceScreenshot)
+admin.site.register(EvidencePcap)

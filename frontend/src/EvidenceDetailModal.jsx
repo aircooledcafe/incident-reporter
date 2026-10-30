@@ -1,6 +1,14 @@
 import React from 'react';
 import { Modal, Row, Col, Badge, Button } from 'react-bootstrap';
-import { Star, ExternalLink, Edit3, Trash2, Image as ImageIcon } from 'lucide-react';
+import {
+  Star,
+  ExternalLink,
+  Edit3,
+  Trash2,
+  Image as ImageIcon,
+  Network,
+  Download,
+} from 'lucide-react';
 import { splitMitreValues } from './mitreData';
 
 function formatUtcTimestamp(isoString) {
@@ -8,6 +16,14 @@ function formatUtcTimestamp(isoString) {
   const d = new Date(isoString);
   if (Number.isNaN(d.getTime())) return isoString;
   return d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+}
+
+function formatBytes(bytes) {
+  const num = Number(bytes || 0);
+  if (!num || num <= 0) return '';
+  if (num < 1024) return `${num} B`;
+  if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
+  return `${(num / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 export default function EvidenceDetailModal({
@@ -18,17 +34,20 @@ export default function EvidenceDetailModal({
   canModifyActiveProject,
   canDeleteItem,
   canDeleteScreenshot,
+  canDeletePcap,
   onToggleKey,
   onEdit,
   onDelete,
   onPreviewScreenshot,
   onDeleteScreenshot,
+  onDeletePcap,
 }) {
   if (!item) return null;
 
   const tactics = splitMitreValues(item.mitre_tactic);
   const techniques = splitMitreValues(item.mitre_technique);
   const screenshots = item.screenshots || [];
+  const pcaps = item.pcaps || [];
   const hasAnyLinks = Boolean(
     item.related_log_link || item.search_result_link || item.search_query_link,
   );
@@ -301,6 +320,62 @@ export default function EvidenceDetailModal({
                   )}
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Attached PCAP Packet Captures */}
+        <div className="p-3 soc-subbox">
+          <div className="small fw-semibold text-lb-cyan mb-2 d-flex align-items-center gap-1">
+            <Network size={14} />
+            <span>Packet Captures / PCAPs ({pcaps.length})</span>
+          </div>
+          {pcaps.length === 0 ? (
+            <div className="small text-secondary">No PCAP files attached to this evidence item.</div>
+          ) : (
+            <div className="d-flex flex-column gap-2">
+              {pcaps.map((pcap) => {
+                const sizeLabel = formatBytes(pcap.file_size);
+                return (
+                  <div
+                    key={pcap.id}
+                    className="p-2 px-3 rounded border border-secondary bg-dark d-flex flex-wrap justify-content-between align-items-center gap-2"
+                  >
+                    <div className="text-break">
+                      <div className="mono-text text-white fw-semibold">
+                        {pcap.filename}
+                        {sizeLabel ? (
+                          <span className="text-secondary fw-normal ms-2">({sizeLabel})</span>
+                        ) : null}
+                      </div>
+                      {pcap.description && (
+                        <div className="small text-secondary">{pcap.description}</div>
+                      )}
+                    </div>
+                    <div className="d-flex align-items-center gap-2">
+                      <Button
+                        as="a"
+                        href={pcap.download_url || pcap.file_url}
+                        className="btn-lb-cyan"
+                        size="sm"
+                      >
+                        <Download size={13} className="me-1" />
+                        Download PCAP
+                      </Button>
+                      {canDeletePcap && canDeletePcap(pcap) && (
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          onClick={() => onDeletePcap(pcap)}
+                        >
+                          <Trash2 size={12} className="me-1" />
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

@@ -16,6 +16,7 @@ from .models import (
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
+    EvidencePcap,
     get_user_display_name,
 )
 from .permissions import (
@@ -24,6 +25,7 @@ from .permissions import (
     assert_project_unlocked,
     assert_can_delete_evidence_item,
     assert_can_delete_screenshot,
+    assert_can_delete_pcap,
 )
 from .serializers import (
     ProjectSerializer,
@@ -32,6 +34,7 @@ from .serializers import (
     ExternalResearchSerializer,
     EvidenceItemSerializer,
     EvidenceScreenshotSerializer,
+    EvidencePcapSerializer,
 )
 from .reports import (
     build_investigation_report_filename,
@@ -190,7 +193,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 class EvidenceItemViewSet(viewsets.ModelViewSet):
     queryset = (
         EvidenceItem.objects.select_related('project', 'created_by')
-        .prefetch_related('screenshots__created_by')
+        .prefetch_related('screenshots__created_by', 'pcaps__created_by')
         .all()
     )
     serializer_class = EvidenceItemSerializer
@@ -204,6 +207,31 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
             qs = qs.filter(project_id=project_id)
         return qs
 
+    def _save_uploaded_attachments(self, instance):
+        files = self.request.FILES.getlist('screenshots_upload')
+        captions = self.request.data.getlist('screenshot_captions') if hasattr(self.request.data, 'getlist') else []
+        for idx, img_file in enumerate(files):
+            caption = captions[idx] if idx < len(captions) else ""
+            EvidenceScreenshot.objects.create(
+                evidence=instance,
+                image=img_file,
+                caption=caption,
+                analyst_name=instance.analyst_name,
+                created_by=self.request.user,
+            )
+
+        pcap_files = self.request.FILES.getlist('pcaps_upload')
+        pcap_descriptions = self.request.data.getlist('pcap_descriptions') if hasattr(self.request.data, 'getlist') else []
+        for idx, pcap_file in enumerate(pcap_files):
+            desc = pcap_descriptions[idx] if idx < len(pcap_descriptions) else ""
+            EvidencePcap.objects.create(
+                evidence=instance,
+                file=pcap_file,
+                description=desc,
+                analyst_name=instance.analyst_name,
+                created_by=self.request.user,
+            )
+
     def perform_create(self, serializer):
         project = serializer.validated_data.get('project')
         assert_project_unlocked(project)
@@ -211,17 +239,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         if not analyst:
             analyst = get_user_display_name(self.request.user)
         instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
-        files = self.request.FILES.getlist('screenshots_upload')
-        captions = self.request.data.getlist('screenshot_captions') if hasattr(self.request.data, 'getlist') else []
-        for idx, img_file in enumerate(files):
-            caption = captions[idx] if idx < len(captions) else ""
-            EvidenceScreenshot.objects.create(
-                evidence=instance,
-                image=img_file,
-                caption=caption,
-                analyst_name=instance.analyst_name,
-                created_by=self.request.user,
-            )
+        self._save_uploaded_attachments(instance)
         instance.project.sync_archive_manifest()
 
     def perform_update(self, serializer):
@@ -229,17 +247,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         if 'project' in serializer.validated_data:
             assert_project_unlocked(serializer.validated_data['project'])
         instance = serializer.save()
-        files = self.request.FILES.getlist('screenshots_upload')
-        captions = self.request.data.getlist('screenshot_captions') if hasattr(self.request.data, 'getlist') else []
-        for idx, img_file in enumerate(files):
-            caption = captions[idx] if idx < len(captions) else ""
-            EvidenceScreenshot.objects.create(
-                evidence=instance,
-                image=img_file,
-                caption=caption,
-                analyst_name=instance.analyst_name,
-                created_by=self.request.user,
-            )
+        self._save_uploaded_attachments(instance)
         instance.project.sync_archive_manifest()
 
     def perform_destroy(self, instance):
@@ -391,6 +399,40 @@ class EvidenceScreenshotViewSet(viewsets.ModelViewSet):
         project = instance.evidence.project
         assert_project_unlocked(project)
         assert_can_delete_screenshot(self.request.user, instance)
+        instance.delete()
+        project.sync_archive_manifest()
+
+
+class EvidencePcapViewSet(viewsets.ModelViewSet):
+    queryset = EvidencePcap.objects.select_related(
+        'created_by',
+        'evidence__created_by',
+        'evidence__project',
+    ).all()
+    serializer_class = EvidencePcapSerializer
+    permission_classes = [InvestigationItemPermission]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def perform_create(self, serializer):
+        evidence = serializer.validated_data.get('evidence')
+        assert_project_unlocked(evidence.project)
+        analyst = (serializer.validated_data.get('analyst_name') or '').strip()
+        if not analyst:
+            analyst = get_user_display_name(self.request.user)
+        instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
+        instance.evidence.project.sync_archive_manifest()
+
+    def perform_update(self, serializer):
+        assert_project_unlocked(serializer.instance.evidence.project)
+        if 'evidence' in serializer.validated_data:
+            assert_project_unlocked(serializer.validated_data['evidence'].project)
+        instance = serializer.save()
+        instance.evidence.project.sync_archive_manifest()
+
+    def perform_destroy(self, instance):
+        project = instance.evidence.project
+        assert_project_unlocked(project)
+        assert_can_delete_pcap(self.request.user, instance)
         instance.delete()
         project.sync_archive_manifest()
 

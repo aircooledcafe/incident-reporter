@@ -10,7 +10,7 @@ from rest_framework.authtoken.models import Token
 
 def protected_artifact_serve(request, path):
     """
-    Serves investigation screenshots and generated report files from MEDIA_ROOT
+    Serves investigation screenshots, PCAP captures, and generated report files from MEDIA_ROOT
     only to authenticated, active users (via Django session cookie or DRF API Token).
     """
     user = getattr(request, 'user', None)
@@ -27,7 +27,11 @@ def protected_artifact_serve(request, path):
     if not is_authed:
         return HttpResponse("Authentication required.", status=401)
 
-    return serve(request, path, document_root=settings.MEDIA_ROOT)
+    response = serve(request, path, document_root=settings.MEDIA_ROOT)
+    if request.GET.get('download') == '1':
+        safe_filename = Path(path).name.replace('"', '')
+        response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
+    return response
 
 
 def serve_django_static(request, path):

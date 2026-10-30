@@ -14,6 +14,7 @@ from .models import (
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
+    EvidencePcap,
     get_or_create_user_profile,
     get_user_display_name,
     get_user_role,
@@ -24,6 +25,7 @@ from .permissions import (
     can_actor_modify_user,
     can_user_delete_evidence_item,
     can_user_delete_screenshot,
+    can_user_delete_pcap,
     validate_user_management_action,
 )
 from .reports import collect_mitre_summary
@@ -346,8 +348,81 @@ class EvidenceScreenshotSerializer(serializers.ModelSerializer):
         return can_user_delete_screenshot(request.user, obj)
 
 
+class EvidencePcapSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    download_url = serializers.SerializerMethodField()
+    filename = serializers.SerializerMethodField()
+    file_size = serializers.SerializerMethodField()
+    created_by_username = serializers.SerializerMethodField()
+    can_actor_delete = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EvidencePcap
+        fields = [
+            'id',
+            'evidence',
+            'file',
+            'file_url',
+            'download_url',
+            'filename',
+            'file_size',
+            'description',
+            'analyst_name',
+            'created_by',
+            'created_by_username',
+            'can_actor_delete',
+            'uploaded_at',
+        ]
+        read_only_fields = [
+            'id',
+            'created_by',
+            'created_by_username',
+            'can_actor_delete',
+            'uploaded_at',
+            'file_url',
+            'download_url',
+            'filename',
+            'file_size',
+        ]
+
+    def get_file_url(self, obj) -> str:
+        if not obj.file:
+            return ""
+        return f"{settings.MEDIA_URL}{obj.file.name}"
+
+    def get_download_url(self, obj) -> str:
+        if not obj.file:
+            return ""
+        return f"{settings.MEDIA_URL}{obj.file.name}?download=1"
+
+    def get_filename(self, obj) -> str:
+        if not obj.file:
+            return ""
+        return os.path.basename(obj.file.name)
+
+    def get_file_size(self, obj) -> int:
+        try:
+            if obj.file and obj.file.storage.exists(obj.file.name):
+                return int(obj.file.size)
+        except Exception:
+            pass
+        return 0
+
+    def get_created_by_username(self, obj) -> str:
+        if obj.created_by_id and obj.created_by:
+            return obj.created_by.username
+        return ""
+
+    def get_can_actor_delete(self, obj) -> bool:
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        return can_user_delete_pcap(request.user, obj)
+
+
 class EvidenceItemSerializer(serializers.ModelSerializer):
     screenshots = EvidenceScreenshotSerializer(many=True, read_only=True)
+    pcaps = EvidencePcapSerializer(many=True, read_only=True)
     evidence_type_display = serializers.CharField(
         source='get_evidence_type_display',
         read_only=True,
@@ -382,6 +457,7 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
             'notes',
             'is_key_evidence',
             'screenshots',
+            'pcaps',
             'created_at',
             'updated_at',
         ]
@@ -394,6 +470,7 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
             'updated_at',
             'evidence_type_display',
             'screenshots',
+            'pcaps',
         ]
 
     def get_created_by_username(self, obj) -> str:

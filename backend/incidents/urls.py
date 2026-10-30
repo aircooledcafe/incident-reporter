@@ -19,6 +19,7 @@ from .views import (
     CustomerContactViewSet,
     ExternalResearchViewSet,
     EvidenceScreenshotViewSet,
+    EvidencePcapViewSet,
     MitreCatalogAPIView,
     SOCIngestAPIView,
 )
@@ -30,6 +31,7 @@ router.register(r'related-incidents', RelatedIncidentViewSet, basename='related-
 router.register(r'customer-contacts', CustomerContactViewSet, basename='customer-contact')
 router.register(r'external-research', ExternalResearchViewSet, basename='external-research')
 router.register(r'screenshots', EvidenceScreenshotViewSet, basename='screenshot')
+router.register(r'pcaps', EvidencePcapViewSet, basename='pcap')
 router.register(r'users', UserViewSet, basename='user')
 
 urlpatterns = [
