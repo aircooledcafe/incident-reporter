@@ -41,6 +41,7 @@ class UserProfile(models.Model):
         default=ROLE_ANALYST,
     )
     preferred_display_name = models.CharField(max_length=150, blank=True, default="")
+    job_role = models.CharField(max_length=120, blank=True, default="")
     pronouns = models.CharField(max_length=64, blank=True, default="")
     avatar = models.FileField(upload_to=avatar_upload_path, null=True, blank=True)
 
@@ -188,7 +189,7 @@ class Project(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return self.title or f"Incident Project #{self.pk}"
+        return self.title or f"Investigation #{self.pk}"
 
     def get_or_create_artifact_folder(self) -> str:
         """

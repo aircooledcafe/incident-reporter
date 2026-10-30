@@ -12,6 +12,17 @@ const PRONOUN_SUGGESTIONS = [
   'any pronouns',
 ];
 
+const JOB_ROLE_SUGGESTIONS = [
+  'SOC Analyst',
+  'Senior SOC Analyst',
+  'Lead Incident Responder',
+  'Incident Commander',
+  'Threat Hunter',
+  'DFIR Specialist',
+  'SOC Manager',
+  'Executive Reviewer',
+];
+
 function getInitials(user) {
   const src = user?.display_name || user?.username || '?';
   const parts = src.trim().split(/\s+/);
@@ -35,6 +46,7 @@ export default function AccountProfileModal({
 
   // Profile fields
   const [preferredDisplayName, setPreferredDisplayName] = useState('');
+  const [jobRole, setJobRole] = useState('');
   const [pronouns, setPronouns] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -57,6 +69,7 @@ export default function AccountProfileModal({
     if (show && authUser) {
       setTab('profile');
       setPreferredDisplayName(authUser.preferred_display_name || '');
+      setJobRole(authUser.job_role || '');
       setPronouns(authUser.pronouns || '');
       setFirstName(authUser.first_name || '');
       setLastName(authUser.last_name || '');
@@ -97,6 +110,7 @@ export default function AccountProfileModal({
       setSavingProfile(true);
       const formData = new FormData();
       formData.append('preferred_display_name', preferredDisplayName.trim());
+      formData.append('job_role', jobRole.trim());
       formData.append('pronouns', pronouns.trim());
       formData.append('first_name', firstName.trim());
       formData.append('last_name', lastName.trim());
@@ -170,6 +184,11 @@ export default function AccountProfileModal({
             <option key={p} value={p} />
           ))}
         </datalist>
+        <datalist id="job-role-presets-list">
+          {JOB_ROLE_SUGGESTIONS.map((r) => (
+            <option key={r} value={r} />
+          ))}
+        </datalist>
 
         <Nav
           variant="tabs"
@@ -178,7 +197,7 @@ export default function AccountProfileModal({
           onSelect={(k) => setTab(k || 'profile')}
         >
           <Nav.Item>
-            <Nav.Link eventKey="profile">Profile, Avatar &amp; Pronouns</Nav.Link>
+            <Nav.Link eventKey="profile">Profile, Role &amp; Avatar</Nav.Link>
           </Nav.Item>
           <Nav.Item>
             <Nav.Link eventKey="security">Password &amp; API Token</Nav.Link>
@@ -209,6 +228,10 @@ export default function AccountProfileModal({
                       ({pronouns.trim()})
                     </span>
                   )}
+                </div>
+                <div className="small text-lb-cyan mb-1">
+                  {jobRole.trim() ? `${jobRole.trim()} • ` : ''}
+                  Access Level: {roleLabel}
                 </div>
                 <div className="small text-secondary mb-2">
                   Upload a profile avatar (PNG, JPG, GIF, WebP up to 5 MB). Stored in persistent external artifacts storage.
@@ -250,7 +273,7 @@ export default function AccountProfileModal({
             </div>
 
             <Row className="g-3">
-              <Col md={7}>
+              <Col md={4}>
                 <Form.Group>
                   <Form.Label className="small">Preferred Display Name</Form.Label>
                   <Form.Control
@@ -260,12 +283,28 @@ export default function AccountProfileModal({
                     onChange={(e) => setPreferredDisplayName(e.target.value)}
                   />
                   <Form.Text className="text-secondary" style={{ fontSize: '0.74rem' }}>
-                    Displayed in the navigation bar, analyst attribution, and team directory.
+                    Shown in the top menu, timeline attribution, and directory.
                   </Form.Text>
                 </Form.Group>
               </Col>
 
-              <Col md={5}>
+              <Col md={4}>
+                <Form.Group>
+                  <Form.Label className="small">Role / Job Title</Form.Label>
+                  <Form.Control
+                    type="text"
+                    list="job-role-presets-list"
+                    placeholder="e.g. Senior SOC Analyst"
+                    value={jobRole}
+                    onChange={(e) => setJobRole(e.target.value)}
+                  />
+                  <Form.Text className="text-secondary" style={{ fontSize: '0.74rem' }}>
+                    Your SOC / team role displayed on your profile &amp; top menu.
+                  </Form.Text>
+                </Form.Group>
+              </Col>
+
+              <Col md={4}>
                 <Form.Group>
                   <Form.Label className="small">Pronouns</Form.Label>
                   <Form.Control
@@ -275,6 +314,9 @@ export default function AccountProfileModal({
                     value={pronouns}
                     onChange={(e) => setPronouns(e.target.value)}
                   />
+                  <Form.Text className="text-secondary" style={{ fontSize: '0.74rem' }}>
+                    Visible in your profile details (not shown on the top button).
+                  </Form.Text>
                 </Form.Group>
               </Col>
 

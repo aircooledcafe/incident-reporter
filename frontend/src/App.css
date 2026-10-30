@@ -89,6 +89,19 @@ body {
   color: #ffffff;
 }
 
+.btn-lb-green {
+  background-color: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
+}
+
+.btn-lb-green:hover,
+.btn-lb-green:focus {
+  background-color: #15803d;
+  border-color: #15803d;
+  color: #ffffff;
+}
+
 .btn-lb-cyan {
   background-color: transparent;
   border-color: var(--lb-cyan);
@@ -139,6 +152,14 @@ body {
 .timeline-row-key {
   background-color: rgba(53, 100, 243, 0.1) !important;
   border-left: 3px solid var(--lb-lime);
+}
+
+.timeline-row-clickable {
+  cursor: pointer;
+}
+
+.timeline-row-clickable:hover td {
+  background-color: rgba(0, 150, 179, 0.12) !important;
 }
 
 .screenshot-thumb {

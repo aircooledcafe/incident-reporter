@@ -1,6 +1,6 @@
-# SOC Incident Response Evidence & Timeline Reporter
+# SOC Investigations
 
-A full-stack incident response evidence recording, chronological timeline construction, role-based access control, and reporting application built for SOC teams.
+A full-stack SOC investigation management, chronological evidence timeline construction, role-based access control, and investigation reporting application.
 
 ---
 
@@ -13,32 +13,33 @@ A full-stack incident response evidence recording, chronological timeline constr
 
 ## Key Features
 
-1. **Top-Level Investigations Homepage (Default View)**
-   - Displays an at-a-glance overview of **current open investigations** by default, surfacing **Customer**, **Ticket Links**, **Related Escalated Incident Links**, **Incident Summary**, and **Analyst Action Plan**.
+1. **SOC Investigation Overview Homepage (Default View)**
+   - Displays an at-a-glance overview of **current open investigations** by default, surfacing **Customer**, **Ticket Links**, **Related Escalated Incident Links**, **Investigation Summary**, and **Analyst Action Plan**, with green **New Investigation** action buttons.
    - Includes instant filter toggles for **Open**, **All**, **Archived**, and **Locked** investigations, plus ordering controls (**Chronological Newest/Oldest** and **Customer Name A→Z / Z→A**) and keyword search.
 
 2. **Django Built-In Authentication, User Profiles & Four-Tier RBAC**
    - Backed directly by Django's `django.contrib.auth` (`auth_user`, password validators, database-backed `django_session`, and DRF `authtoken_token`) paired with `UserProfile` roles: **Super Admin**, **Admin**, **Analyst**, and **Executive**.
-   - **User Name Dropdown Menu & Personalization**: Clicking your user name in the top navigation bar opens a dropdown for **Account, Avatar & Preferences**, **User & Role Management** (Admin / Super Admin), **Django Database Admin** (Super Admin), and **Sign Out**. Users can upload/remove a **profile avatar**, set a **preferred display name**, and specify **pronouns**.
-   - **Project Locking (Read-Only Mode)**: **Admin** and **Super Admin** users can lock any investigation project to freeze it as read-only (and unlock it when needed). Both **Locked** and **Archived** investigations are hidden from the workspace sidebar by default until toggled on.
+   - **User Name Dropdown Menu & Personalization**: The top navigation user button displays your **avatar**, **preferred display name**, and **role** (without cluttering the top bar with pronouns). Clicking your user name opens a dropdown for **Account, Avatar & Preferences**, **User & Role Management** (Admin / Super Admin), **Django Database Admin** (Super Admin), and **Sign Out**. Users can upload/remove a **profile avatar**, set a **preferred display name**, specify their **SOC role / job title** (`job_role`), and set **pronouns**.
+   - **Investigation Locking (Read-Only Mode)**: **Admin** and **Super Admin** users can lock any investigation to freeze it as read-only (and unlock it when needed). Both **Locked** and **Archived** investigations are hidden from the workspace sidebar by default until toggled on.
    - **Super Admin Themed Demo Scenarios**: **Super Admin** accounts have exclusive access to **Load Sample Incident**, featuring four complete demonstration scenarios (*The Expanse* VPN/AD intrusion, *Star Trek* website compromise & web shells, *The Matrix* ClickFix to Domain Controller takeover, and *Star Wars* MitM phishing, spam wave & multi-account takeover).
 
-3. **Incident Project Overview & Archive Folder Provisioning**
-   - Supports **Title**, **Customer Name**, **Customer ID**, **Ticket ID**, **Ticket Link**, **Summary of Incident**, **Action Plan** (free-form next steps, investigation areas, and customer requests), **Related Escalated Incidents** (titles + links), **Key Customer Contacts** (name, role/title, email, phone, notes + bridge notes), **Key Assets Affected**, **Key Users Affected**, **Key Malicious Indicators**, and **External Research** links & summaries.
-   - Automatically provisions a dedicated investigation folder (`artifacts/project_<id>_<slug>/`) containing `screenshots/`, `reports/`, and a live-synced `archive_manifest.json`.
+3. **Investigation Workspace (`Overview`, `Evidence Timeline`, `Report Generation`)**
+   - **Overview**: Supports **Title**, **Customer Name**, **Customer ID**, **Ticket ID**, **Ticket Link**, **Summary of Investigation**, **Action Plan** (free-form next steps, investigation areas, and customer requests), **Related Escalated Incidents** (titles + links), **Key Customer Contacts** (name, role/title, email, phone, notes + bridge notes), **Key Assets Affected**, **Key Users Affected**, **Key Malicious Indicators**, and **External Research** links & summaries.
+   - Automatically provisions a dedicated archive folder (`artifacts/project_<id>_<slug>/`) containing `screenshots/`, `reports/`, and a live-synced `archive_manifest.json`.
    - Investigation status management (`Open / Triage`, `Investigating`, `Contained`, `Archived / Closed`) with a header status picker, confirmation warning when closing/archiving, and sidebar switches for **Show Archived** and **Show Locked**.
 
-4. **Multi-Analyst Evidence Collection, MITRE Multi-Select & Chronological Timeline**
-   - Multiple analysts can contribute evidence concurrently, with analyst attribution pre-populated from the signed-in user's preferred display name.
+4. **Streamlined Evidence Timeline, Click-to-Inspect Detail Popup & MITRE Multi-Select**
+   - **Clean Timeline View + Full Detail Popup**: The **Evidence Timeline** table focuses on **Key** status, **Timestamp (UTC)**, **Asset & User**, **Summary & Indicators**, and **Links**. Clicking any row opens a comprehensive **Evidence Item Details** popup displaying every recorded detail (analyst attribution, evidence type, timestamps, defanged assets/indicators/commands, MITRE ATT&CK Tactics & Techniques, links, and attached screenshots).
    - **MITRE ATT&CK Multi-Select Dropdowns**: Evidence items feature multi-select menus for Enterprise **MITRE Tactics** and **MITRE Techniques**, dynamically filtering relevant techniques for the selected tactic(s) and pairing them in report summary tables.
-   - **Atomic Events (`ATOMIC`)** & **Search Result Evidence (`SEARCH`)** with timestamps, attacker-created user flags, commands run, screenshots, links, and **Key Evidence** flagging.
    - **Scoped Defanging**: Automatically defangs affected or malicious assets, hostnames, domains, files, IPs, and URLs (`192.168[.]1.1`, `domain[.]com`, `hxxps[:]//`, `payload[.]exe`) while keeping analyst-provided links intact and clickable.
 
-5. **Two Incident Report Outputs**
-   - **Report 1 — Evidence Timeline Report (`.csv`)**: Time-ordered CSV export of **all** recorded evidence items, including multi-selected MITRE ATT&CK Tactics and Techniques.
-   - **Report 2 — Key Evidence Formatted Report (`.odt` OpenDocument Text & `.md` Markdown)**:
-     - Includes **only items flagged as Key Evidence**, ordered chronologically, with embedded screenshots and three **Summary Tables at the bottom** (*Key Assets Affected*, *Key Malicious Indicators*, and *MITRE Tactics and Techniques*).
-     - The Markdown export automatically creates a dedicated `key_evidence_screenshots_project_<id>/` folder alongside the `.md` report (also downloadable as a `.zip` bundle).
+5. **Investigation Report Exports & Standardized Filenames**
+   - Exported files use the investigation's creation date and metadata in the format:
+     `date_customer_id_ticket_investigation_id.<ext>` (e.g., `2026-10-30_CUST-100_INC-500_1.csv`), automatically omitting the ticket segment (`date_customer_id_investigation_id.<ext>`) when no ticket ID is present.
+   - **Report 1 — Investigation Evidence Timeline (`.csv`)**: Time-ordered CSV export of **all** recorded investigation evidence items, including multi-selected MITRE ATT&CK Tactics and Techniques.
+   - **Report 2 — Investigation Key Evidence Report (`.odt` OpenDocument Text & `.md` Markdown / `.zip`)**:
+     - Includes **only items flagged as Key Evidence**, ordered chronologically, with embedded screenshots and three **Investigation Summary Tables at the bottom** (*Key Assets Affected*, *Key Malicious Indicators*, and *MITRE Tactics and Techniques*).
+     - The Markdown export automatically creates a dedicated `key_evidence_screenshots_investigation_<id>/` folder alongside the `.md` report (also downloadable as a `.zip` bundle).
 
 ---
 
@@ -116,6 +117,7 @@ erDiagram
         int user_id FK "OneToOne -> auth_user"
         string role "SUPER_ADMIN | ADMIN | ANALYST | EXECUTIVE"
         string preferred_display_name
+        string job_role "User SOC / team role title"
         string pronouns
         file avatar "Stored under artifacts/avatars/"
         datetime created_at

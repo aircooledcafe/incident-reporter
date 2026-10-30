@@ -134,7 +134,7 @@ def validate_user_management_action(
 def assert_project_unlocked(project) -> None:
     if project and project.is_locked:
         raise PermissionDenied(
-            "This project is locked (read-only). An Admin or Super Admin must unlock it before changes can be made."
+            "This investigation is locked (read-only). An Admin or Super Admin must unlock it before changes can be made."
         )
 
 
@@ -155,7 +155,7 @@ class ProjectAccessPermission(permissions.BasePermission):
         if action_name in ('seed_demo', 'demo_scenarios'):
             if not is_super_admin(user):
                 raise PermissionDenied(
-                    "Only Super Admin users can load sample demonstration incidents."
+                    "Only Super Admin users can load sample demonstration investigations."
                 )
             return True
 
@@ -165,7 +165,7 @@ class ProjectAccessPermission(permissions.BasePermission):
         if action_name in ('destroy', 'lock', 'unlock') or request.method == 'DELETE':
             if not is_admin_or_super(user):
                 raise PermissionDenied(
-                    "Only Admin and Super Admin users can lock, unlock, or delete projects."
+                    "Only Admin and Super Admin users can lock, unlock, or delete investigations."
                 )
             return True
 

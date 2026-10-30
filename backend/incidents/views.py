@@ -32,6 +32,7 @@ from .serializers import (
     EvidenceScreenshotSerializer,
 )
 from .reports import (
+    build_investigation_report_filename,
     generate_timeline_csv,
     generate_key_evidence_odt,
     generate_key_evidence_markdown,
@@ -62,7 +63,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.is_locked:
             raise PermissionDenied(
-                "Cannot delete a locked project. Unlock the project first if you intend to delete it."
+                "Cannot delete a locked investigation. Unlock the investigation first if you intend to delete it."
             )
         instance.delete()
 
@@ -96,12 +97,13 @@ class ProjectViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def report_csv(self, request, pk=None):
         """
-        Report One: Generates and downloads a time-ordered CSV report of ALL evidence.
+        Report One: Generates and downloads a time-ordered CSV investigation report of ALL evidence.
+        Filename format: date_customer_id_ticket_investigation_id.csv (omits ticket when blank).
         """
         project = self.get_object()
         csv_content, _ = generate_timeline_csv(project)
         project.sync_archive_manifest()
-        filename = f"incident_{project.pk}_evidence_timeline.csv"
+        filename = build_investigation_report_filename(project, "csv")
         response = HttpResponse(csv_content, content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
@@ -109,13 +111,13 @@ class ProjectViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def report_odt(self, request, pk=None):
         """
-        Report Two (ODT): Generates and downloads a concise OpenDocument Text (.odt) report
+        Report Two (ODT): Generates and downloads a concise OpenDocument Text (.odt) investigation report
         of ONLY Key Evidence items, time-ordered, with embedded screenshots, links, and summary tables.
         """
         project = self.get_object()
         odt_bytes, _ = generate_key_evidence_odt(project)
         project.sync_archive_manifest()
-        filename = f"incident_{project.pk}_key_evidence_report.odt"
+        filename = build_investigation_report_filename(project, "odt")
         response = HttpResponse(
             odt_bytes,
             content_type="application/vnd.oasis.opendocument.text",
@@ -126,20 +128,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def report_md(self, request, pk=None):
         """
-        Report Two (Markdown): Creates the dedicated screenshot folder alongside the Markdown report
-        and downloads either the .md file or a .zip bundle (containing the .md + screenshot folder)
+        Report Two (Markdown): Creates the dedicated screenshot folder alongside the Markdown investigation
+        report and downloads either the .md file or a .zip bundle (containing the .md + screenshot folder)
         when ?bundle=zip is passed.
         """
         project = self.get_object()
         md_content, _, zip_bytes = generate_key_evidence_markdown(project)
         project.sync_archive_manifest()
         if request.query_params.get("bundle") == "zip":
-            filename = f"incident_{project.pk}_key_evidence_markdown_with_screenshots.zip"
+            filename = build_investigation_report_filename(project, "zip")
             response = HttpResponse(zip_bytes, content_type="application/zip")
             response["Content-Disposition"] = f'attachment; filename="{filename}"'
             return response
 
-        filename = f"incident_{project.pk}_key_evidence_report.md"
+        filename = build_investigation_report_filename(project, "md")
         response = HttpResponse(md_content, content_type="text/markdown; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response

@@ -211,6 +211,8 @@ class UserProfileAPIView(APIView):
 
         if 'preferred_display_name' in request.data:
             profile.preferred_display_name = (request.data.get('preferred_display_name') or '').strip()[:150]
+        if 'job_role' in request.data:
+            profile.job_role = (request.data.get('job_role') or '').strip()[:120]
         if 'pronouns' in request.data:
             profile.pronouns = (request.data.get('pronouns') or '').strip()[:64]
 
@@ -318,6 +320,7 @@ class AnalystDirectoryAPIView(APIView):
                     "id": u.pk,
                     "username": u.username,
                     "display_name": get_user_display_name(u),
+                    "job_role": profile.job_role or "",
                     "pronouns": profile.pronouns or "",
                     "avatar_url": f"{settings.MEDIA_URL}{profile.avatar.name}" if profile.avatar else "",
                     "role": profile.role,

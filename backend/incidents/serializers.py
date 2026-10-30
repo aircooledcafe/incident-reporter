@@ -34,6 +34,7 @@ class AuthUserSerializer(serializers.ModelSerializer):
     role_display = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
     preferred_display_name = serializers.SerializerMethodField()
+    job_role = serializers.SerializerMethodField()
     pronouns = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
@@ -48,6 +49,7 @@ class AuthUserSerializer(serializers.ModelSerializer):
             'last_name',
             'display_name',
             'preferred_display_name',
+            'job_role',
             'pronouns',
             'avatar_url',
             'role',
@@ -72,6 +74,9 @@ class AuthUserSerializer(serializers.ModelSerializer):
     def get_preferred_display_name(self, obj) -> str:
         return get_or_create_user_profile(obj).preferred_display_name or ""
 
+    def get_job_role(self, obj) -> str:
+        return get_or_create_user_profile(obj).job_role or ""
+
     def get_pronouns(self, obj) -> str:
         return get_or_create_user_profile(obj).pronouns or ""
 
@@ -94,6 +99,10 @@ class ManagedUserSerializer(serializers.ModelSerializer):
     role_display = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
     preferred_display_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
+    job_role = serializers.CharField(
         required=False,
         allow_blank=True,
     )
@@ -121,6 +130,7 @@ class ManagedUserSerializer(serializers.ModelSerializer):
             'last_name',
             'display_name',
             'preferred_display_name',
+            'job_role',
             'pronouns',
             'avatar_url',
             'role',
@@ -147,6 +157,7 @@ class ManagedUserSerializer(serializers.ModelSerializer):
         profile = get_or_create_user_profile(instance)
         instance.role = profile.role
         instance.preferred_display_name = profile.preferred_display_name
+        instance.job_role = profile.job_role
         instance.pronouns = profile.pronouns
         return super().to_representation(instance)
 
@@ -220,6 +231,7 @@ class ManagedUserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         role = validated_data.pop('role', UserProfile.ROLE_ANALYST)
         preferred_display_name = validated_data.pop('preferred_display_name', '')
+        job_role = validated_data.pop('job_role', '')
         pronouns = validated_data.pop('pronouns', '')
         password = validated_data.pop('password')
         is_super = role == UserProfile.ROLE_SUPER_ADMIN
@@ -237,14 +249,16 @@ class ManagedUserSerializer(serializers.ModelSerializer):
         profile = get_or_create_user_profile(user)
         profile.role = role
         profile.preferred_display_name = preferred_display_name
+        profile.job_role = job_role
         profile.pronouns = pronouns
-        profile.save(update_fields=['role', 'preferred_display_name', 'pronouns', 'updated_at'])
+        profile.save(update_fields=['role', 'preferred_display_name', 'job_role', 'pronouns', 'updated_at'])
         sync_user_flags_for_role(user, role)
         return user
 
     def update(self, instance, validated_data):
         role = validated_data.pop('role', None)
         preferred_display_name = validated_data.pop('preferred_display_name', None)
+        job_role = validated_data.pop('job_role', None)
         pronouns = validated_data.pop('pronouns', None)
         password = validated_data.pop('password', None)
 
@@ -263,6 +277,9 @@ class ManagedUserSerializer(serializers.ModelSerializer):
             changed = True
         if preferred_display_name is not None and profile.preferred_display_name != preferred_display_name:
             profile.preferred_display_name = preferred_display_name
+            changed = True
+        if job_role is not None and profile.job_role != job_role:
+            profile.job_role = job_role
             changed = True
         if pronouns is not None and profile.pronouns != pronouns:
             profile.pronouns = pronouns

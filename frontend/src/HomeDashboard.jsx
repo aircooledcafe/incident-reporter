@@ -115,16 +115,16 @@ export default function HomeDashboard({
           <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
             <div>
               <h5 className="mb-1 text-white fw-semibold">
-                SOC Incident Investigations Overview
+                SOC Investigation Overview
               </h5>
               <div className="small text-secondary fw-normal">
-                Review active incident investigations, ticket links, customer details, incident summaries, and analyst action plans.
+                Review active investigations, ticket links, customer details, investigation summaries, and analyst action plans.
               </div>
             </div>
 
             {canEditRole && (
               <div className="d-flex flex-wrap gap-2">
-                <Button className="btn-lb-primary" size="sm" onClick={onOpenNewProject}>
+                <Button className="btn-lb-green" size="sm" onClick={onOpenNewProject}>
                   <Plus size={15} className="me-1" />
                   New Investigation
                 </Button>
@@ -212,9 +212,9 @@ export default function HomeDashboard({
                 </Button>
               )}
               {canEditRole && (
-                <Button className="btn-lb-primary" size="sm" onClick={onOpenNewProject}>
+                <Button className="btn-lb-green" size="sm" onClick={onOpenNewProject}>
                   <Plus size={14} className="me-1" />
-                  Create New Investigation
+                  New Investigation
                 </Button>
               )}
               {canSeedDemo && demoScenarios && demoScenarios.length > 0 && (
@@ -243,7 +243,7 @@ export default function HomeDashboard({
                       onClick={() => onOpenInvestigation(project.id)}
                       className="btn btn-link p-0 text-start text-white fw-semibold text-decoration-none fs-5"
                     >
-                      {project.title || `Incident #${project.id}`}
+                      {project.title || `Investigation #${project.id}`}
                     </button>
 
                     <Badge
@@ -326,10 +326,10 @@ export default function HomeDashboard({
               <Row className="g-3">
                 <Col lg={6}>
                   <div className="p-3 soc-subbox h-100">
-                    <div className="small fw-semibold text-lb-cyan mb-1">Incident Summary</div>
+                    <div className="small fw-semibold text-lb-cyan mb-1">Investigation Summary</div>
                     <div className="small pre-wrap-text">
                       {project.summary || (
-                        <span className="text-secondary">No incident summary recorded yet.</span>
+                        <span className="text-secondary">No investigation summary recorded yet.</span>
                       )}
                     </div>
                   </div>

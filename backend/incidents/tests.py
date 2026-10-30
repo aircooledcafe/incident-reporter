@@ -274,20 +274,31 @@ class IncidentReporterTests(TestCase):
         self.assertEqual(shot_fetch.status_code, 200)
         list(shot_fetch.streaming_content)
 
-        # Verify Report 1: CSV Timeline Report
+        # Verify Report 1: CSV Timeline Report & Filename Format (date_customer_id_ticket_investigation_id.csv)
+        expected_date = project.created_at.astimezone(dt_timezone.utc).strftime("%Y-%m-%d")
         csv_res = self.client.get(f"/api/projects/{project.id}/report_csv/")
         self.assertEqual(csv_res.status_code, 200)
+        self.assertEqual(
+            csv_res["Content-Disposition"],
+            f'attachment; filename="{expected_date}_CUST-100_INC-500_{project.id}.csv"',
+        )
         rows = list(csv.reader(io.StringIO(csv_res.content.decode("utf-8"))))
         self.assertEqual(len(rows), 4)
         self.assertIn("192.168[.]1.1", rows[1][11])
         self.assertEqual(rows[1][15], "https://ids.example/alert/101")
 
-        # Verify Report 2 (ODT)
+        # Verify Report 2 (ODT) & Investigation wording + filename
         odt_res = self.client.get(f"/api/projects/{project.id}/report_odt/")
         self.assertEqual(odt_res.status_code, 200)
+        self.assertEqual(
+            odt_res["Content-Disposition"],
+            f'attachment; filename="{expected_date}_CUST-100_INC-500_{project.id}.odt"',
+        )
         with zipfile.ZipFile(io.BytesIO(odt_res.content), "r") as zf:
             xml_text = zf.read("content.xml").decode("utf-8")
             self.assertNotIn("[Key Evidence]", xml_text)
+            self.assertIn("Summary of Investigation", xml_text)
+            self.assertIn("Investigation Summary Tables", xml_text)
             self.assertIn("2026-10-17 01:00:00 UTC, WEB-01 (10.0[.]0.5), www-data:", xml_text)
             self.assertIn("192.168[.]1.1", xml_text)
             self.assertIn("https://ids.example/alert/101", xml_text)
@@ -295,12 +306,39 @@ class IncidentReporterTests(TestCase):
             self.assertIn("KeyMaliciousIndicatorsTable", xml_text)
             self.assertIn("MitreTacticsTechniquesTable", xml_text)
 
-        # Verify Report 2 (Markdown)
+        # Verify Report 2 (Markdown & ZIP) + filename
         md_res = self.client.get(f"/api/projects/{project.id}/report_md/")
         self.assertEqual(md_res.status_code, 200)
+        self.assertEqual(
+            md_res["Content-Disposition"],
+            f'attachment; filename="{expected_date}_CUST-100_INC-500_{project.id}.md"',
+        )
         md_text = md_res.content.decode("utf-8")
         self.assertNotIn("[Key Evidence]", md_text)
+        self.assertIn("## Summary of Investigation", md_text)
         self.assertIn("### 2026-10-17 01:00:00 UTC, WEB-01 (10.0[.]0.5), www-data:", md_text)
+
+        zip_res = self.client.get(f"/api/projects/{project.id}/report_md/?bundle=zip")
+        self.assertEqual(zip_res.status_code, 200)
+        self.assertEqual(
+            zip_res["Content-Disposition"],
+            f'attachment; filename="{expected_date}_CUST-100_INC-500_{project.id}.zip"',
+        )
+
+        # Verify filename omits ticket when no ticket is present on the investigation
+        no_ticket_inv = Project.objects.create(
+            title="Unticketed Threat Hunt",
+            customer_name="Initech",
+            customer_id="CUST-100",
+            ticket_id="",
+        )
+        no_ticket_date = no_ticket_inv.created_at.astimezone(dt_timezone.utc).strftime("%Y-%m-%d")
+        no_ticket_csv = self.client.get(f"/api/projects/{no_ticket_inv.id}/report_csv/")
+        self.assertEqual(no_ticket_csv.status_code, 200)
+        self.assertEqual(
+            no_ticket_csv["Content-Disposition"],
+            f'attachment; filename="{no_ticket_date}_CUST-100_{no_ticket_inv.id}.csv"',
+        )
 
         # Verify screenshot deletion
         shot_id = shot_res.json()["id"]
@@ -365,6 +403,7 @@ class IncidentReporterTests(TestCase):
             "/api/auth/profile/",
             {
                 "preferred_display_name": "Capt. Jim Holden",
+                "job_role": "Incident Commander",
                 "pronouns": "he/him",
                 "avatar": avatar_upload,
             },
@@ -374,6 +413,7 @@ class IncidentReporterTests(TestCase):
         profile_json = patch_res.json()
         self.assertEqual(profile_json["preferred_display_name"], "Capt. Jim Holden")
         self.assertEqual(profile_json["display_name"], "Capt. Jim Holden")
+        self.assertEqual(profile_json["job_role"], "Incident Commander")
         self.assertEqual(profile_json["pronouns"], "he/him")
         self.assertTrue(profile_json["avatar_url"].startswith("/artifacts/avatars/"))
 

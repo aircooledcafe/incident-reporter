@@ -32,8 +32,8 @@ def _super_admin_only_permission(request) -> bool:
 
 
 admin.site.has_permission = _super_admin_only_permission
-admin.site.site_header = "Incident Reporter — Super Admin Database Administration"
-admin.site.site_title = "Incident Reporter Super Admin"
+admin.site.site_header = "SOC Investigations — Super Admin Database Administration"
+admin.site.site_title = "SOC Investigations Super Admin"
 
 
 class UserProfileInline(admin.StackedInline):
@@ -62,9 +62,9 @@ class CustomUserAdmin(BaseUserAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'role', 'preferred_display_name', 'pronouns', 'updated_at')
+    list_display = ('user', 'role', 'job_role', 'preferred_display_name', 'pronouns', 'updated_at')
     list_filter = ('role',)
-    search_fields = ('user__username', 'user__email', 'preferred_display_name')
+    search_fields = ('user__username', 'user__email', 'preferred_display_name', 'job_role')
 
 
 @admin.register(Project)

@@ -23,7 +23,6 @@ import {
   Edit3,
   FileSpreadsheet,
   FileText,
-  X,
   AlertTriangle,
   ChevronDown,
   Lock,
@@ -43,8 +42,8 @@ import { api } from './api';
 import HomeDashboard from './HomeDashboard';
 import AccountProfileModal from './AccountProfileModal';
 import ProjectOverviewExtras from './ProjectOverviewExtras';
+import EvidenceDetailModal from './EvidenceDetailModal';
 import { MitreTacticsSelect, MitreTechniquesSelect } from './MitreMultiSelect';
-import { splitMitreValues } from './mitreData';
 
 const STATUS_LABELS = {
   OPEN: 'Open / Triage',
@@ -133,6 +132,7 @@ const EMPTY_USER_FORM = {
   first_name: '',
   last_name: '',
   email: '',
+  job_role: '',
   role: 'ANALYST',
   password: '',
   is_active: true,
@@ -284,7 +284,8 @@ export default function App() {
   const [researchLink, setResearchLink] = useState('');
   const [researchSummary, setResearchSummary] = useState('');
 
-  // Screenshot Lightbox Modal
+  // Evidence item detail popup & Screenshot Lightbox Modal
+  const [detailEvidenceId, setDetailEvidenceId] = useState(null);
   const [previewScreenshot, setPreviewScreenshot] = useState(null);
 
   // Timeline filters
@@ -395,7 +396,7 @@ export default function App() {
         setActiveProject(null);
       }
     } catch (err) {
-      handleApiError(err, 'Failed to load incident projects');
+      handleApiError(err, 'Failed to load investigations');
     } finally {
       setLoading(false);
     }
@@ -553,6 +554,7 @@ export default function App() {
       first_name: target.first_name || '',
       last_name: target.last_name || '',
       email: target.email || '',
+      job_role: target.job_role || '',
       role: target.role || 'ANALYST',
       password: '',
       is_active: Boolean(target.is_active),
@@ -568,6 +570,7 @@ export default function App() {
           first_name: userForm.first_name.trim(),
           last_name: userForm.last_name.trim(),
           email: userForm.email.trim(),
+          job_role: userForm.job_role.trim(),
           role: userForm.role,
           is_active: userForm.is_active,
         };
@@ -579,6 +582,7 @@ export default function App() {
           first_name: userForm.first_name.trim(),
           last_name: userForm.last_name.trim(),
           email: userForm.email.trim(),
+          job_role: userForm.job_role.trim(),
           role: userForm.role,
           password: userForm.password,
           is_active: userForm.is_active,
@@ -625,13 +629,16 @@ export default function App() {
     try {
       setLoading(true);
       setShowHeaderStatusPicker(false);
+      if (selectedProjectId !== id) {
+        setDetailEvidenceId(null);
+      }
       const detail = await api.getProject(id);
       setSelectedProjectId(detail.id);
       setActiveProject(detail);
       const list = await api.listProjects().catch(() => null);
       if (list) setProjects(list);
     } catch (err) {
-      handleApiError(err, `Could not load project #${id}`);
+      handleApiError(err, `Could not load investigation #${id}`);
     } finally {
       setLoading(false);
     }
@@ -658,7 +665,7 @@ export default function App() {
         setMainView('investigations');
       }
     } catch (err) {
-      handleApiError(err, 'Failed to load sample project');
+      handleApiError(err, 'Failed to load sample investigation');
     } finally {
       setLoading(false);
     }
@@ -674,11 +681,11 @@ export default function App() {
       await loadProjects(updated.id);
       notifySuccess(
         updated.is_locked
-          ? 'Project locked (read-only). Toggle "Show Locked" in the sidebar to list locked items.'
-          : 'Project unlocked (editing restored).',
+          ? 'Investigation locked (read-only). Toggle "Show Locked" in the sidebar to list locked items.'
+          : 'Investigation unlocked (editing restored).',
       );
     } catch (err) {
-      handleApiError(err, 'Failed to change project lock state');
+      handleApiError(err, 'Failed to change investigation lock state');
     }
   };
 
@@ -689,10 +696,10 @@ export default function App() {
       await api.deleteProject(activeProject.id);
       setShowDeleteProjectModal(false);
       await loadProjects(null, true);
-      notifySuccess(`Deleted project "${deletedTitle}".`);
+      notifySuccess(`Deleted investigation "${deletedTitle}".`);
     } catch (err) {
       setShowDeleteProjectModal(false);
-      handleApiError(err, 'Failed to delete project');
+      handleApiError(err, 'Failed to delete investigation');
     }
   };
 
@@ -703,7 +710,7 @@ export default function App() {
       setActiveProject(updated);
       await loadProjects(updated.id);
       setShowHeaderStatusPicker(false);
-      notifySuccess(`Project status updated to ${STATUS_LABELS[newStatus] || newStatus}.`);
+      notifySuccess(`Investigation status updated to ${STATUS_LABELS[newStatus] || newStatus}.`);
     } catch (err) {
       handleApiError(err, 'Failed to update status');
     }
@@ -758,16 +765,16 @@ export default function App() {
         const updated = await api.updateProject(activeProject.id, projectForm);
         setActiveProject(updated);
         await loadProjects(updated.id);
-        notifySuccess('Project overview updated.');
+        notifySuccess('Investigation overview updated.');
       } else {
         const created = await api.createProject(projectForm);
         await loadProjects(created.id);
         setMainView('investigations');
-        notifySuccess(`Created project "${created.title || '#' + created.id}".`);
+        notifySuccess(`Created investigation "${created.title || '#' + created.id}".`);
       }
       setShowProjectModal(false);
     } catch (err) {
-      handleApiError(err, 'Failed to save project');
+      handleApiError(err, 'Failed to save investigation');
     }
   };
 
@@ -1079,7 +1086,7 @@ export default function App() {
         <Card className="soc-card auth-card shadow-lg">
           <Card.Header className="soc-card-header py-3 d-flex align-items-center gap-2">
             <Shield size={18} className="text-lb-cyan" />
-            <span>Incident Response Evidence Recorder — Sign In</span>
+            <span>SOC Investigations — Sign In</span>
           </Card.Header>
           <Card.Body className="p-4">
             <p className="text-secondary small mb-3">
@@ -1214,6 +1221,9 @@ export default function App() {
   const currentlyEditingItem = editingEvidenceId
     ? timelineItems.find((i) => i.id === editingEvidenceId)
     : null;
+  const detailEvidenceItem = detailEvidenceId
+    ? timelineItems.find((i) => i.id === detailEvidenceId) || null
+    : null;
 
   const analystSuggestions = Array.from(
     new Set(
@@ -1230,7 +1240,7 @@ export default function App() {
   const assignableRoles = canManageAdmins
     ? [
         ['SUPER_ADMIN', 'Super Admin (Full System & Admin Management)'],
-        ['ADMIN', 'Admin (User & Project Administration)'],
+        ['ADMIN', 'Admin (User & Investigation Administration)'],
         ['ANALYST', 'Analyst (Create & Modify Investigations)'],
         ['EXECUTIVE', 'Executive (Read-Only & Report Export)'],
       ]
@@ -1238,6 +1248,8 @@ export default function App() {
         ['ANALYST', 'Analyst (Create & Modify Investigations)'],
         ['EXECUTIVE', 'Executive (Read-Only & Report Export)'],
       ];
+
+  const topMenuRoleText = authUser.job_role || ROLE_LABELS[authUser.role] || authUser.role;
 
   return (
     <div className="min-vh-100 d-flex flex-column">
@@ -1258,7 +1270,7 @@ export default function App() {
               className="fw-semibold text-white me-1"
               style={{ cursor: 'pointer' }}
             >
-              Incident Response Evidence Recorder
+              SOC Investigations
             </Navbar.Brand>
 
             <div className="d-flex align-items-center gap-1">
@@ -1333,13 +1345,13 @@ export default function App() {
             )}
 
             {canEditRole && (
-              <Button className="btn-lb-primary" size="sm" onClick={openNewProjectModal}>
+              <Button className="btn-lb-green" size="sm" onClick={openNewProjectModal}>
                 <Plus size={15} className="me-1" />
-                New Project
+                New Investigation
               </Button>
             )}
 
-            {/* User Name Dropdown Menu (Account, Avatar/Profile, User Admin, DB Admin, Sign Out) */}
+            {/* User Name Dropdown Menu (Preferred Username + Role only on top button) */}
             <div className="position-relative" ref={userDropdownRef}>
               <button
                 type="button"
@@ -1357,13 +1369,8 @@ export default function App() {
                   <span className="user-avatar-circle">{userInitials}</span>
                 )}
                 <span className="small text-white fw-semibold">{currentAnalystName}</span>
-                {authUser.pronouns && (
-                  <span className="text-secondary" style={{ fontSize: '0.74rem' }}>
-                    ({authUser.pronouns})
-                  </span>
-                )}
                 <Badge bg={ROLE_BADGE_BG[authUser.role] || 'secondary'} style={{ fontSize: '0.68rem' }}>
-                  {ROLE_LABELS[authUser.role] || authUser.role}
+                  {topMenuRoleText}
                 </Badge>
                 <ChevronDown size={14} className="text-secondary" />
               </button>
@@ -1374,6 +1381,10 @@ export default function App() {
                     <div className="fw-semibold text-white small">
                       {currentAnalystName}
                       {authUser.pronouns ? ` (${authUser.pronouns})` : ''}
+                    </div>
+                    <div className="text-lb-cyan" style={{ fontSize: '0.75rem' }}>
+                      {authUser.job_role ? `${authUser.job_role} • ` : ''}
+                      {ROLE_LABELS[authUser.role] || authUser.role}
                     </div>
                     <div className="mono-text text-secondary" style={{ fontSize: '0.75rem' }}>
                       @{authUser.username}
@@ -1527,9 +1538,16 @@ export default function App() {
                           </div>
                         </td>
                         <td>
-                          <span>{u.display_name || '—'}</span>
-                          {u.pronouns && (
-                            <span className="text-secondary small ms-1">({u.pronouns})</span>
+                          <div>
+                            <span>{u.display_name || '—'}</span>
+                            {u.pronouns && (
+                              <span className="text-secondary small ms-1">({u.pronouns})</span>
+                            )}
+                          </div>
+                          {u.job_role && (
+                            <div className="text-lb-cyan" style={{ fontSize: '0.74rem' }}>
+                              {u.job_role}
+                            </div>
                           )}
                         </td>
                         <td className="text-secondary small">{u.email || '—'}</td>
@@ -1594,13 +1612,13 @@ export default function App() {
         ) : (
           /* ==================== INVESTIGATIONS WORKSPACE VIEW ==================== */
           <Row className="g-4">
-            {/* Left Sidebar: Projects List */}
+            {/* Left Sidebar: Investigations List */}
             <Col lg={3} xl={2}>
               <Card className="soc-card">
                 <Card.Header className="soc-card-header py-2">
                   <div className="d-flex justify-content-between align-items-center">
                     <span className="small text-uppercase text-secondary">
-                      Projects ({visibleSidebarProjects.length})
+                      Investigations ({visibleSidebarProjects.length})
                     </span>
                   </div>
                   <div className="mt-2 pt-1 border-top border-secondary d-flex flex-column gap-1">
@@ -1632,15 +1650,16 @@ export default function App() {
                       <p className="mb-2">
                         {projects.length > 0
                           ? 'No open unlocked investigations. Toggle "Show Archived" or "Show Locked" above.'
-                          : 'No projects created yet.'}
+                          : 'No investigations created yet.'}
                       </p>
                       {canEditRole && (
                         <Button
-                          className="btn-lb-primary w-100"
+                          className="btn-lb-green w-100"
                           size="sm"
                           onClick={openNewProjectModal}
                         >
-                          Create Project
+                          <Plus size={14} className="me-1" />
+                          New Investigation
                         </Button>
                       )}
                     </div>
@@ -1658,7 +1677,7 @@ export default function App() {
                           >
                             <div className="d-flex justify-content-between align-items-start gap-1">
                               <div className="fw-semibold small text-white text-truncate">
-                                {p.title || `Incident #${p.id}`}
+                                {p.title || `Investigation #${p.id}`}
                               </div>
                               {p.is_locked && (
                                 <Lock
@@ -1702,25 +1721,26 @@ export default function App() {
               </Card>
             </Col>
 
-            {/* Main Project Area */}
+            {/* Main Investigation Area */}
             <Col lg={9} xl={10}>
               {!activeProject ? (
                 <Card className="soc-card text-center py-5">
                   <Card.Body>
                     <h5 className="text-white mb-2">
                       {canEditRole
-                        ? 'Select or Create an Incident Project'
-                        : 'Select an Incident Project'}
+                        ? 'Select or Create an Investigation'
+                        : 'Select an Investigation'}
                     </h5>
                     <p className="text-secondary small mb-3">
                       {canEditRole
-                        ? 'Create a new incident project or select one from the sidebar to begin recording evidence.'
+                        ? 'Create a new investigation or select one from the sidebar to begin recording evidence.'
                         : 'Select an investigation from the sidebar to review evidence and export reports.'}
                     </p>
                     <div className="d-flex justify-content-center gap-2">
                       {canEditRole && (
-                        <Button className="btn-lb-primary" onClick={openNewProjectModal}>
-                          Create Project
+                        <Button className="btn-lb-green" onClick={openNewProjectModal}>
+                          <Plus size={15} className="me-1" />
+                          New Investigation
                         </Button>
                       )}
                       {canSeedDemo && (
@@ -1733,12 +1753,12 @@ export default function App() {
                 </Card>
               ) : (
                 <>
-                  {/* Project Header */}
+                  {/* Investigation Header */}
                   <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary">
                     <div>
                       <div className="d-flex align-items-center gap-2 mb-1">
                         <h4 className="mb-0 text-white fw-semibold">
-                          {activeProject.title || `Incident #${activeProject.id}`}
+                          {activeProject.title || `Investigation #${activeProject.id}`}
                         </h4>
                         {isProjectLocked && (
                           <Badge bg="warning" text="dark" className="d-inline-flex align-items-center gap-1">
@@ -1844,7 +1864,7 @@ export default function App() {
                             onClick={openEditProjectModal}
                           >
                             <Edit3 size={14} className="me-1" />
-                            Edit Project
+                            Edit Investigation
                           </Button>
                         </>
                       )}
@@ -1856,19 +1876,19 @@ export default function App() {
                           onClick={handleToggleProjectLock}
                           title={
                             isProjectLocked
-                              ? 'Unlock project to allow editing'
-                              : 'Lock project to make it read-only'
+                              ? 'Unlock investigation to allow editing'
+                              : 'Lock investigation to make it read-only'
                           }
                         >
                           {isProjectLocked ? (
                             <>
                               <Unlock size={14} className="me-1" />
-                              Unlock Project
+                              Unlock Investigation
                             </>
                           ) : (
                             <>
                               <Lock size={14} className="me-1" />
-                              Lock Project
+                              Lock Investigation
                             </>
                           )}
                         </Button>
@@ -1881,8 +1901,8 @@ export default function App() {
                           disabled={isProjectLocked}
                           title={
                             isProjectLocked
-                              ? 'Unlock this project before deleting it'
-                              : 'Delete project permanently'
+                              ? 'Unlock this investigation before deleting it'
+                              : 'Delete investigation permanently'
                           }
                           onClick={() => setShowDeleteProjectModal(true)}
                         >
@@ -1893,13 +1913,13 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Read-Only Banner when Project is Locked */}
+                  {/* Read-Only Banner when Investigation is Locked */}
                   {isProjectLocked && (
                     <div className="locked-banner px-3 py-2 mb-3 small d-flex flex-wrap justify-content-between align-items-center gap-2">
                       <div className="d-flex align-items-center gap-2">
                         <Lock size={15} />
                         <span>
-                          <strong>Project Locked (Read-Only):</strong> Modifications to overview,
+                          <strong>Investigation Locked (Read-Only):</strong> Modifications to overview,
                           evidence, research, and screenshots are disabled
                           {activeProject.locked_by_display
                             ? ` (locked by ${activeProject.locked_by_display}${
@@ -1922,26 +1942,22 @@ export default function App() {
                     onSelect={(k) => setActiveTab(k)}
                   >
                     <Nav.Item>
-                      <Nav.Link eventKey="overview">Project Overview</Nav.Link>
+                      <Nav.Link eventKey="overview">Overview</Nav.Link>
                     </Nav.Item>
                     <Nav.Item>
-                      <Nav.Link eventKey="timeline">
-                        Incident Evidence Timeline ({activeProject.evidence_count})
-                      </Nav.Link>
+                      <Nav.Link eventKey="timeline">Evidence Timeline</Nav.Link>
                     </Nav.Item>
                     <Nav.Item>
-                      <Nav.Link eventKey="reports">
-                        Incident Report Generation ({activeProject.key_evidence_count} Key)
-                      </Nav.Link>
+                      <Nav.Link eventKey="reports">Report Generation</Nav.Link>
                     </Nav.Item>
                   </Nav>
 
-                  {/* TAB 1: PROJECT OVERVIEW */}
+                  {/* TAB 1: INVESTIGATION OVERVIEW */}
                   {activeTab === 'overview' && (
                     <div className="d-flex flex-column gap-3">
                       <Card className="soc-card">
                         <Card.Header className="soc-card-header d-flex justify-content-between align-items-center">
-                          <span>Incident Overview</span>
+                          <span>Investigation Overview</span>
                           {canModifyActiveProject && (
                             <Button
                               variant="outline-light"
@@ -1988,7 +2004,7 @@ export default function App() {
                           </Row>
 
                           <div className="mb-4">
-                            <div className="text-secondary small mb-1">Summary of Incident</div>
+                            <div className="text-secondary small mb-1">Summary of Investigation</div>
                             <div className="p-3 soc-subbox">
                               {activeProject.summary || 'No summary provided.'}
                             </div>
@@ -2193,12 +2209,20 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* TAB 2: INCIDENT EVIDENCE TIMELINE */}
+                  {/* TAB 2: EVIDENCE TIMELINE */}
                   {activeTab === 'timeline' && (
                     <Card className="soc-card">
                       <Card.Header className="soc-card-header py-3">
                         <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                          <span>Chronological Evidence Timeline</span>
+                          <div>
+                            <div>
+                              Evidence Timeline ({filteredTimeline.length} of{' '}
+                              {activeProject.evidence_count})
+                            </div>
+                            <div className="small text-secondary fw-normal mt-1">
+                              Click any timeline item to open full details, MITRE ATT&amp;CK mappings, analyst attribution, and screenshots.
+                            </div>
+                          </div>
                           <div className="d-flex flex-wrap align-items-center gap-2">
                             <Form.Check
                               type="switch"
@@ -2238,14 +2262,11 @@ export default function App() {
                           <Table responsive hover variant="dark" className="mb-0 align-middle">
                             <thead className="small text-secondary text-uppercase">
                               <tr>
-                                <th style={{ width: '90px' }}>Key</th>
-                                <th style={{ width: '185px' }}>Timestamp (UTC)</th>
-                                <th style={{ width: '130px' }}>Type / Analyst</th>
-                                <th style={{ width: '175px' }}>Asset &amp; User</th>
-                                <th>Analyst Notes, Indicators &amp; Commands</th>
-                                <th style={{ width: '180px' }}>MITRE ATT&amp;CK</th>
-                                <th style={{ width: '150px' }}>Screenshots</th>
-                                <th style={{ width: '150px' }}>Links</th>
+                                <th style={{ width: '95px' }}>Key</th>
+                                <th style={{ width: '195px' }}>Timestamp (UTC)</th>
+                                <th style={{ width: '210px' }}>Asset &amp; User</th>
+                                <th>Summary &amp; Indicators</th>
+                                <th style={{ width: '155px' }}>Links</th>
                                 {canModifyActiveProject && (
                                   <th style={{ width: '100px' }} className="text-end">
                                     Actions
@@ -2257,9 +2278,13 @@ export default function App() {
                               {filteredTimeline.map((item) => (
                                 <tr
                                   key={item.id}
-                                  className={item.is_key_evidence ? 'timeline-row-key' : ''}
+                                  onClick={() => setDetailEvidenceId(item.id)}
+                                  title="Click to inspect full evidence details"
+                                  className={`timeline-row-clickable ${
+                                    item.is_key_evidence ? 'timeline-row-key' : ''
+                                  }`}
                                 >
-                                  <td>
+                                  <td onClick={(e) => e.stopPropagation()}>
                                     {canModifyActiveProject ? (
                                       <Button
                                         variant={
@@ -2304,15 +2329,6 @@ export default function App() {
                                     )}
                                   </td>
 
-                                  <td className="small">
-                                    <div className="fw-semibold text-lb-cyan">
-                                      {item.evidence_type === 'ATOMIC'
-                                        ? 'Atomic Event'
-                                        : 'Search Result'}
-                                    </div>
-                                    <div className="text-secondary">{item.analyst_name || '—'}</div>
-                                  </td>
-
                                   <td className="mono-text small">
                                     <div>{defangText(item.affected_asset) || '—'}</div>
                                     <div className="text-secondary mt-1">
@@ -2322,81 +2338,23 @@ export default function App() {
                                   </td>
 
                                   <td className="small">
-                                    {item.summary && <div className="mb-1">{item.summary}</div>}
+                                    {item.summary ? (
+                                      <div className="fw-medium text-white mb-1">{item.summary}</div>
+                                    ) : (
+                                      <div className="text-secondary mb-1">No summary</div>
+                                    )}
                                     {item.notes && (
                                       <div className="text-secondary mb-1">Notes: {item.notes}</div>
                                     )}
                                     {item.malicious_hosts_ips && (
-                                      <div className="mono-text text-lb-cyan mb-1">
+                                      <div className="mono-text text-lb-cyan">
                                         Indicators: {defangText(item.malicious_hosts_ips)}
                                       </div>
-                                    )}
-                                    {item.commands_run && (
-                                      <pre className="cmd-pre mt-1">
-                                        {defangText(item.commands_run)}
-                                      </pre>
-                                    )}
-                                  </td>
-
-                                  <td className="small">
-                                    {item.mitre_tactic || item.mitre_technique ? (
-                                      <div className="d-flex flex-column gap-1">
-                                        {splitMitreValues(item.mitre_tactic).map((tac, idx) => (
-                                          <div key={`tac-${idx}`} className="fw-semibold text-lb-cyan">
-                                            {tac}
-                                          </div>
-                                        ))}
-                                        {splitMitreValues(item.mitre_technique).map((tech, idx) => (
-                                          <div key={`tech-${idx}`} className="text-secondary mono-text">
-                                            {tech}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-secondary">—</span>
-                                    )}
-                                  </td>
-
-                                  <td>
-                                    {item.screenshots && item.screenshots.length > 0 ? (
-                                      <div className="d-flex flex-wrap gap-2">
-                                        {item.screenshots.map((shot) => (
-                                          <div
-                                            key={shot.id}
-                                            className="position-relative d-inline-block"
-                                          >
-                                            <img
-                                              src={shot.image_url}
-                                              alt={shot.caption || shot.filename}
-                                              title={shot.caption || shot.filename}
-                                              className="screenshot-thumb"
-                                              onClick={() => setPreviewScreenshot(shot)}
-                                            />
-                                            {canModifyActiveProject && (
-                                              <button
-                                                type="button"
-                                                title="Delete screenshot"
-                                                onClick={() => handleDeleteScreenshot(shot.id)}
-                                                className="btn btn-sm btn-dark position-absolute top-0 end-0 p-0 d-flex align-items-center justify-content-center border-secondary"
-                                                style={{
-                                                  width: '20px',
-                                                  height: '20px',
-                                                  lineHeight: 1,
-                                                }}
-                                              >
-                                                <X size={12} />
-                                              </button>
-                                            )}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-secondary small">—</span>
                                     )}
                                   </td>
 
                                   {/* Analyst links to logs & searches are NOT defanged */}
-                                  <td className="small">
+                                  <td className="small" onClick={(e) => e.stopPropagation()}>
                                     <div className="d-flex flex-column gap-1">
                                       {item.related_log_link && (
                                         <a
@@ -2437,11 +2395,12 @@ export default function App() {
                                   </td>
 
                                   {canModifyActiveProject && (
-                                    <td className="text-end">
+                                    <td className="text-end" onClick={(e) => e.stopPropagation()}>
                                       <div className="d-flex justify-content-end gap-1">
                                         <Button
                                           variant="outline-light"
                                           size="sm"
+                                          title="Edit evidence item"
                                           onClick={() => openEditEvidenceModal(item)}
                                         >
                                           <Edit3 size={13} />
@@ -2449,6 +2408,7 @@ export default function App() {
                                         <Button
                                           variant="outline-secondary"
                                           size="sm"
+                                          title="Delete evidence item"
                                           onClick={() => handleDeleteEvidence(item.id)}
                                         >
                                           <Trash2 size={13} />
@@ -2465,20 +2425,22 @@ export default function App() {
                     </Card>
                   )}
 
-                  {/* TAB 3: INCIDENT REPORT GENERATION */}
+                  {/* TAB 3: INVESTIGATION REPORT GENERATION */}
                   {activeTab === 'reports' && (
                     <div className="d-flex flex-column gap-3">
                       <Row className="g-3">
                         <Col md={6}>
                           <Card className="soc-card h-100">
                             <Card.Header className="soc-card-header">
-                              Report 1: Evidence Timeline Report (CSV)
+                              Report 1: Investigation Evidence Timeline (CSV)
                             </Card.Header>
                             <Card.Body className="d-flex flex-column justify-content-between">
                               <p className="small text-secondary mb-3">
-                                Exports all {activeProject.evidence_count} evidence items in
-                                chronological order as a CSV file, with defanged assets/indicators
-                                and MITRE tactics and techniques.
+                                Exports all {activeProject.evidence_count} investigation evidence
+                                items in chronological order as a CSV file (
+                                <code>date_customer_id_ticket_investigation_id.csv</code>, omitting
+                                ticket if none is set), with defanged assets/indicators and MITRE
+                                tactics and techniques.
                               </p>
                               <div>
                                 <Button
@@ -2488,7 +2450,7 @@ export default function App() {
                                   size="sm"
                                 >
                                   <FileSpreadsheet size={15} className="me-2" />
-                                  Download Timeline CSV
+                                  Download Investigation CSV
                                 </Button>
                               </div>
                             </Card.Body>
@@ -2498,14 +2460,14 @@ export default function App() {
                         <Col md={6}>
                           <Card className="soc-card h-100">
                             <Card.Header className="soc-card-header">
-                              Report 2: Key Evidence Formatted Document (.ODT / .MD)
+                              Report 2: Investigation Key Evidence Report (.ODT / .MD)
                             </Card.Header>
                             <Card.Body className="d-flex flex-column justify-content-between">
                               <p className="small text-secondary mb-3">
                                 Exports only the {activeProject.key_evidence_count} Key Evidence
-                                items in chronological order followed by summary tables for Key
-                                Assets Affected, Key Malicious Indicators, and MITRE Tactics &amp;
-                                Techniques.
+                                items from this investigation in chronological order, followed by
+                                summary tables for Key Assets Affected, Key Malicious Indicators,
+                                and MITRE Tactics &amp; Techniques.
                               </p>
                               <div className="d-flex flex-wrap gap-2">
                                 <Button
@@ -2515,7 +2477,7 @@ export default function App() {
                                   size="sm"
                                 >
                                   <FileText size={15} className="me-2" />
-                                  Download OpenDocument (.ODT)
+                                  Download Investigation (.ODT)
                                 </Button>
                                 <Button
                                   as="a"
@@ -2523,7 +2485,7 @@ export default function App() {
                                   className="btn-lb-cyan"
                                   size="sm"
                                 >
-                                  Download Markdown + Screenshots Folder (.ZIP)
+                                  Download Markdown + Screenshots (.ZIP)
                                 </Button>
                                 <Button
                                   as="a"
@@ -2531,7 +2493,7 @@ export default function App() {
                                   variant="outline-light"
                                   size="sm"
                                 >
-                                  Download .MD File
+                                  Download Investigation (.MD)
                                 </Button>
                               </div>
                             </Card.Body>
@@ -2542,19 +2504,19 @@ export default function App() {
                       {/* Structured Key Evidence Report Preview */}
                       <Card className="soc-card">
                         <Card.Header className="soc-card-header">
-                          Report 2 Structure Preview
+                          Investigation Key Evidence Report Preview
                         </Card.Header>
                         <Card.Body className="d-flex flex-column gap-4">
-                          {/* 1. TITLE & 2. Summary of Incident */}
+                          {/* 1. TITLE & 2. Summary of Investigation */}
                           <div className="p-3 soc-subbox">
                             <h4 className="text-white fw-bold mb-2">
-                              {activeProject.title || `Incident #${activeProject.id}`}
+                              {activeProject.title || `Investigation #${activeProject.id}`}
                             </h4>
                             <div className="text-lb-cyan small fw-semibold mb-1">
-                              Summary of Incident
+                              Summary of Investigation
                             </div>
                             <div>
-                              {activeProject.summary || 'No summary of incident recorded.'}
+                              {activeProject.summary || 'No summary of investigation recorded.'}
                             </div>
                           </div>
 
@@ -2666,10 +2628,10 @@ export default function App() {
                             )}
                           </div>
 
-                          {/* 4. Summary Tables at the Bottom */}
+                          {/* 4. Investigation Summary Tables at the Bottom */}
                           <div>
                             <h6 className="text-lb-cyan fw-semibold mb-3">
-                              Summary Tables (Bottom of Report)
+                              Investigation Summary Tables (Bottom of Report)
                             </h6>
                             <Row className="g-3">
                               <Col md={6}>
@@ -2788,7 +2750,7 @@ export default function App() {
           <p className="text-secondary mb-0">
             Archived investigations are hidden from the sidebar by default. You can still view and
             re-open them anytime by enabling the <strong>Show Archived</strong> toggle in the
-            projects sidebar.
+            investigations sidebar.
           </p>
         </Modal.Body>
         <Modal.Footer className="bg-dark border-secondary">
@@ -2808,7 +2770,7 @@ export default function App() {
         </Modal.Footer>
       </Modal>
 
-      {/* Modal: Confirm Delete Project (Admin / Super Admin) */}
+      {/* Modal: Confirm Delete Investigation (Admin / Super Admin) */}
       <Modal
         show={showDeleteProjectModal}
         onHide={() => setShowDeleteProjectModal(false)}
@@ -2818,7 +2780,7 @@ export default function App() {
         <Modal.Header closeButton className="bg-dark border-danger">
           <Modal.Title className="fs-6 d-flex align-items-center gap-2 text-danger">
             <AlertTriangle size={18} />
-            <span>Confirm Project Deletion</span>
+            <span>Confirm Investigation Deletion</span>
           </Modal.Title>
         </Modal.Header>
         <Modal.Body className="bg-dark text-light small">
@@ -2827,8 +2789,8 @@ export default function App() {
             <strong>{activeProject?.title || `#${activeProject?.id}`}</strong>?
           </p>
           <p className="text-secondary mb-0">
-            This removes the project, all timeline evidence items, external research entries, and
-            its associated artifact directory on disk. This action cannot be undone.
+            This removes the investigation, all timeline evidence items, external research entries,
+            and its associated artifact directory on disk. This action cannot be undone.
           </p>
         </Modal.Body>
         <Modal.Footer className="bg-dark border-secondary">
@@ -2840,12 +2802,12 @@ export default function App() {
             Cancel
           </Button>
           <Button variant="danger" size="sm" onClick={handleConfirmDeleteProject}>
-            Delete Project Permanently
+            Delete Investigation Permanently
           </Button>
         </Modal.Footer>
       </Modal>
 
-      {/* Modal: Create / Edit Project Overview */}
+      {/* Modal: Create / Edit Investigation Overview */}
       <Modal
         show={showProjectModal}
         onHide={() => setShowProjectModal(false)}
@@ -2856,7 +2818,7 @@ export default function App() {
         <Form onSubmit={handleSaveProject}>
           <Modal.Header closeButton className="bg-dark border-secondary">
             <Modal.Title className="fs-6">
-              {editingProject ? 'Edit Project Overview' : 'Create Incident Project'}
+              {editingProject ? 'Edit Investigation Overview' : 'New Investigation'}
             </Modal.Title>
           </Modal.Header>
           <Modal.Body className="bg-dark">
@@ -2936,7 +2898,7 @@ export default function App() {
 
               <Col md={12}>
                 <Form.Group>
-                  <Form.Label className="small">Summary of Incident</Form.Label>
+                  <Form.Label className="small">Summary of Investigation</Form.Label>
                   <Form.Control
                     as="textarea"
                     rows={2}
@@ -3065,8 +3027,8 @@ export default function App() {
             <Button variant="outline-secondary" onClick={() => setShowProjectModal(false)}>
               Cancel
             </Button>
-            <Button className="btn-lb-primary" type="submit">
-              Save Project
+            <Button className={editingProject ? 'btn-lb-primary' : 'btn-lb-green'} type="submit">
+              {editingProject ? 'Save Investigation' : 'New Investigation'}
             </Button>
           </Modal.Footer>
         </Form>
@@ -3393,6 +3355,20 @@ export default function App() {
         </Form>
       </Modal>
 
+      {/* Modal: Full Evidence Item Details Popup (opened on timeline row click) */}
+      <EvidenceDetailModal
+        item={detailEvidenceItem}
+        show={Boolean(detailEvidenceItem)}
+        onHide={() => setDetailEvidenceId(null)}
+        defangText={defangText}
+        canModifyActiveProject={canModifyActiveProject}
+        onToggleKey={handleToggleKeyEvidence}
+        onEdit={openEditEvidenceModal}
+        onDelete={handleDeleteEvidence}
+        onPreviewScreenshot={(shot) => setPreviewScreenshot(shot)}
+        onDeleteScreenshot={handleDeleteScreenshot}
+      />
+
       {/* Modal: Screenshot Preview */}
       <Modal
         show={Boolean(previewScreenshot)}
@@ -3486,7 +3462,7 @@ export default function App() {
                 </Form.Group>
               </Col>
 
-              <Col md={12}>
+              <Col md={6}>
                 <Form.Group>
                   <Form.Label className="small">Email</Form.Label>
                   <Form.Control
@@ -3497,9 +3473,21 @@ export default function App() {
                 </Form.Group>
               </Col>
 
+              <Col md={6}>
+                <Form.Group>
+                  <Form.Label className="small">Profile Role / Job Title</Form.Label>
+                  <Form.Control
+                    type="text"
+                    placeholder="e.g. Senior SOC Analyst"
+                    value={userForm.job_role}
+                    onChange={(e) => setUserForm({ ...userForm, job_role: e.target.value })}
+                  />
+                </Form.Group>
+              </Col>
+
               <Col md={12}>
                 <Form.Group>
-                  <Form.Label className="small">User Role</Form.Label>
+                  <Form.Label className="small">System Access Role</Form.Label>
                   <Form.Select
                     value={userForm.role}
                     onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}

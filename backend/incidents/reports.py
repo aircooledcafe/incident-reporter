@@ -1,10 +1,13 @@
 import csv
 import io
 import os
+import re
 import shutil
 import zipfile
+from datetime import timezone as dt_timezone
 from pathlib import Path
 from django.conf import settings
+from django.utils import timezone
 from PIL import Image as PilImage
 
 from odf.opendocument import OpenDocumentText
@@ -19,9 +22,45 @@ from odf.text import H, P, Span, A, List, ListItem
 from odf.draw import Frame, Image as OdfImage
 from odf.table import Table as OdfTable, TableColumn, TableRow, TableCell
 
-import re
 from .defang import defang_text, split_to_bullet_items
 from .mitre_catalog import TECHNIQUE_CODE_TO_TACTICS
+
+
+def _sanitize_filename_segment(value: str) -> str:
+    if not value:
+        return ""
+    cleaned = re.sub(r'[\\/:*?"<>|;\r\n\t]+', '-', str(value).strip())
+    cleaned = re.sub(r'\s+', '-', cleaned)
+    cleaned = re.sub(r'-{2,}', '-', cleaned)
+    return cleaned.strip('.-_')
+
+
+def build_investigation_report_filename(project, ext: str) -> str:
+    """
+    Builds standardized investigation export filenames in the format:
+        date_customer_id_ticket_investigation_id.<ext>
+    - `date`: Creation date of the investigation in this tool (YYYY-MM-DD UTC).
+    - `customer_id`: Sanitized customer_id (omitted if empty).
+    - `ticket`: Sanitized ticket_id (omitted if no ticket is present).
+    - `investigation_id`: Investigation ID (`project.pk`).
+    """
+    created_dt = getattr(project, "created_at", None) or timezone.now()
+    if timezone.is_aware(created_dt):
+        created_dt = created_dt.astimezone(dt_timezone.utc)
+    date_part = created_dt.strftime("%Y-%m-%d")
+    customer_part = _sanitize_filename_segment(getattr(project, "customer_id", ""))
+    ticket_part = _sanitize_filename_segment(getattr(project, "ticket_id", ""))
+    investigation_id_part = str(project.pk or "0")
+
+    segments = [date_part]
+    if customer_part:
+        segments.append(customer_part)
+    if ticket_part:
+        segments.append(ticket_part)
+    segments.append(investigation_id_part)
+
+    clean_ext = ext.lstrip(".")
+    return f"{'_'.join(segments)}.{clean_ext}"
 
 
 def format_dt(dt) -> str:
@@ -241,11 +280,12 @@ def generate_timeline_csv(project) -> tuple[str, Path]:
 
     csv_content = output.getvalue()
     folder_name = project.get_or_create_artifact_folder()
+    csv_filename = build_investigation_report_filename(project, "csv")
     report_path = (
         Path(settings.ARTIFACTS_ROOT)
         / folder_name
         / "reports"
-        / f"evidence_timeline_project_{project.pk}.csv"
+        / csv_filename
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(csv_content, encoding="utf-8")
@@ -353,13 +393,13 @@ def generate_key_evidence_odt(project) -> tuple[bytes, Path]:
         doc.text.addElement(P(stylename=body_style, text=""))
 
     # 1. TITLE
-    title_text = project.title or f"Incident #{project.pk}"
+    title_text = project.title or f"Investigation #{project.pk}"
     doc.text.addElement(H(outlinelevel=1, stylename=h1_style, text=title_text))
 
-    # 2. Summary of incident
-    doc.text.addElement(H(outlinelevel=2, stylename=h2_style, text="Summary of Incident"))
+    # 2. Summary of investigation
+    doc.text.addElement(H(outlinelevel=2, stylename=h2_style, text="Summary of Investigation"))
     doc.text.addElement(
-        P(stylename=body_style, text=project.summary or "No summary of incident recorded.")
+        P(stylename=body_style, text=project.summary or "No summary of investigation recorded.")
     )
 
     # 3. Key Evidence Timeline
@@ -457,7 +497,7 @@ def generate_key_evidence_odt(project) -> tuple[bytes, Path]:
                 add_line("Links", "None")
 
     # 4. Summary Tables at the Bottom
-    doc.text.addElement(H(outlinelevel=2, stylename=h2_style, text="Incident Summary Tables"))
+    doc.text.addElement(H(outlinelevel=2, stylename=h2_style, text="Investigation Summary Tables"))
 
     assets_list = collect_project_assets(project, all_items)
     add_odf_table(
@@ -488,11 +528,12 @@ def generate_key_evidence_odt(project) -> tuple[bytes, Path]:
     odt_bytes = buf.getvalue()
 
     folder_name = project.get_or_create_artifact_folder()
+    odt_filename = build_investigation_report_filename(project, "odt")
     report_path = (
         Path(settings.ARTIFACTS_ROOT)
         / folder_name
         / "reports"
-        / f"key_evidence_report_project_{project.pk}.odt"
+        / odt_filename
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_bytes(odt_bytes)
@@ -505,23 +546,23 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     Report Two (Markdown + dedicated screenshots folder):
     Follows the exact structure:
       TITLE
-      Summary of incident.
+      Summary of investigation.
       Key Evidence timeline (starting directly with TIMESTAMP, ASSET, USER:)
       Summary tables at the bottom (Key assets affected, Key malicious indicators, MITRE tactics and techniques).
     """
     folder_name = project.get_or_create_artifact_folder()
     reports_dir = Path(settings.ARTIFACTS_ROOT) / folder_name / "reports"
-    screenshots_subdir_name = f"key_evidence_screenshots_project_{project.pk}"
+    screenshots_subdir_name = f"key_evidence_screenshots_investigation_{project.pk}"
     screenshots_dir = reports_dir / screenshots_subdir_name
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
-    title_text = project.title or f"Incident #{project.pk}"
+    title_text = project.title or f"Investigation #{project.pk}"
     lines = [
         f"# {title_text}",
         "",
-        "## Summary of Incident",
+        "## Summary of Investigation",
         "",
-        project.summary or "No summary of incident recorded.",
+        project.summary or "No summary of investigation recorded.",
         "",
         "## Key Evidence Timeline",
         "",
@@ -586,7 +627,7 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
 
     # Bottom Summary Tables
     lines.extend([
-        "## Summary",
+        "## Investigation Summary Tables",
         "",
         "### Key Assets Affected",
         "",
@@ -631,7 +672,8 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     lines.append("")
 
     md_content = "\n".join(lines)
-    report_path = reports_dir / f"key_evidence_report_project_{project.pk}.md"
+    md_filename = build_investigation_report_filename(project, "md")
+    report_path = reports_dir / md_filename
     report_path.write_text(md_content, encoding="utf-8")
 
     zip_buf = io.BytesIO()
@@ -640,7 +682,8 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
         for file_path in copied_files:
             zf.write(file_path, arcname=f"{screenshots_subdir_name}/{file_path.name}")
     zip_bytes = zip_buf.getvalue()
-    zip_path = reports_dir / f"key_evidence_markdown_project_{project.pk}.zip"
+    zip_filename = build_investigation_report_filename(project, "zip")
+    zip_path = reports_dir / zip_filename
     zip_path.write_bytes(zip_bytes)
 
     return md_content, report_path, zip_bytes
