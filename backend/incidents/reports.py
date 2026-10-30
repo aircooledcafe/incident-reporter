@@ -19,7 +19,9 @@ from odf.text import H, P, Span, A, List, ListItem
 from odf.draw import Frame, Image as OdfImage
 from odf.table import Table as OdfTable, TableColumn, TableRow, TableCell
 
+import re
 from .defang import defang_text, split_to_bullet_items
+from .mitre_catalog import TECHNIQUE_CODE_TO_TACTICS
 
 
 def format_dt(dt) -> str:
@@ -107,28 +109,69 @@ def collect_project_indicators(project, items) -> list[str]:
     return unique
 
 
+def _split_mitre_values(raw: str) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in re.split(r'[;\r\n]+', str(raw)) if part.strip()]
+
+
 def collect_mitre_summary(items) -> list[dict]:
     """
     Aggregates MITRE ATT&CK Tactics and Techniques across evidence items
-    for the summary table at the end of the report.
+    for the summary table at the end of the report, supporting both single
+    and multi-selected tactics and techniques.
     """
     seen = {}
     for item in items:
-        tactic = (item.mitre_tactic or "").strip()
-        technique = (item.mitre_technique or "").strip()
-        if not tactic and not technique:
+        tactics = _split_mitre_values(item.mitre_tactic)
+        techniques = _split_mitre_values(item.mitre_technique)
+        if not tactics and not techniques:
             continue
-        key = (tactic, technique)
-        if key not in seen:
-            seen[key] = {
-                "tactic": tactic or "Unspecified Tactic",
-                "technique": technique or "Unspecified Technique",
-                "count": 0,
-                "assets": set(),
-            }
-        seen[key]["count"] += 1
-        if item.affected_asset:
-            seen[key]["assets"].add(defang_text(item.affected_asset.strip()))
+
+        pairs: list[tuple[str, str]] = []
+        if techniques and len(tactics) == 1:
+            for tech in techniques:
+                pairs.append((tactics[0], tech))
+        elif techniques and len(tactics) > 1:
+            matched_tactics = set()
+            for tech in techniques:
+                code = tech.split(" - ")[0].strip().upper()
+                catalog_tactics = TECHNIQUE_CODE_TO_TACTICS.get(code, [])
+                matching = [t for t in tactics if t in catalog_tactics]
+                if matching:
+                    for t in matching:
+                        pairs.append((t, tech))
+                        matched_tactics.add(t)
+                elif catalog_tactics:
+                    pairs.append((catalog_tactics[0], tech))
+                else:
+                    pairs.append((tactics[0], tech))
+                    matched_tactics.add(tactics[0])
+            for t in tactics:
+                if t not in matched_tactics:
+                    pairs.append((t, "Unspecified Technique"))
+        elif techniques and not tactics:
+            for tech in techniques:
+                code = tech.split(" - ")[0].strip().upper()
+                catalog_tactics = TECHNIQUE_CODE_TO_TACTICS.get(code, [])
+                pairs.append((catalog_tactics[0] if catalog_tactics else "Unspecified Tactic", tech))
+        else:
+            for t in tactics:
+                pairs.append((t, "Unspecified Technique"))
+
+        for tactic_val, tech_val in pairs:
+            key = (tactic_val, tech_val)
+            if key not in seen:
+                seen[key] = {
+                    "tactic": tactic_val or "Unspecified Tactic",
+                    "technique": tech_val or "Unspecified Technique",
+                    "count": 0,
+                    "assets": set(),
+                }
+            seen[key]["count"] += 1
+            if item.affected_asset:
+                seen[key]["assets"].add(defang_text(item.affected_asset.strip()))
+
     summary = []
     for val in seen.values():
         summary.append({

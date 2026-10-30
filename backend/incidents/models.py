@@ -11,6 +11,12 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 
+def avatar_upload_path(instance, filename):
+    safe_name = os.path.basename(filename)
+    uid = instance.user_id or "user"
+    return f"avatars/user_{uid}_{safe_name}"
+
+
 class UserProfile(models.Model):
     ROLE_SUPER_ADMIN = 'SUPER_ADMIN'
     ROLE_ADMIN = 'ADMIN'
@@ -34,11 +40,23 @@ class UserProfile(models.Model):
         choices=ROLE_CHOICES,
         default=ROLE_ANALYST,
     )
+    preferred_display_name = models.CharField(max_length=150, blank=True, default="")
+    pronouns = models.CharField(max_length=64, blank=True, default="")
+    avatar = models.FileField(upload_to=avatar_upload_path, null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['user__username']
+
+    def delete_avatar_file(self):
+        if self.avatar:
+            storage = self.avatar.storage
+            name = self.avatar.name
+            self.avatar = None
+            if storage and name and storage.exists(name):
+                storage.delete(name)
 
     def __str__(self):
         return f"{self.user.username} ({self.get_role_display()})"
@@ -92,6 +110,11 @@ def get_user_role(user) -> str:
 def get_user_display_name(user) -> str:
     if not user or not user.is_authenticated:
         return ""
+    profile = getattr(user, 'profile', None)
+    if profile is None and user.pk:
+        profile = get_or_create_user_profile(user)
+    if profile and (profile.preferred_display_name or "").strip():
+        return profile.preferred_display_name.strip()
     full = f"{user.first_name or ''} {user.last_name or ''}".strip()
     return full or user.username
 
@@ -133,6 +156,8 @@ class Project(models.Model):
     ticket_id = models.CharField(max_length=128, blank=True, default="")
     ticket_link = models.CharField(max_length=1024, blank=True, default="")
     summary = models.TextField(blank=True, default="")
+    action_plan = models.TextField(blank=True, default="")
+    key_customer_contacts = models.TextField(blank=True, default="")
     key_assets_affected = models.TextField(blank=True, default="")
     key_users_affected = models.TextField(blank=True, default="")
     key_malicious_indicators = models.TextField(blank=True, default="")
@@ -204,6 +229,28 @@ class Project(models.Model):
             }
             for r in self.external_research_items.all()
         ]
+        related_incidents_list = [
+            {
+                "id": ri.id,
+                "title": ri.title,
+                "link": ri.link,
+                "analyst_name": ri.analyst_name,
+                "created_at": ri.created_at.isoformat() if ri.created_at else None,
+            }
+            for ri in self.related_incidents.all()
+        ]
+        contacts_list = [
+            {
+                "id": c.id,
+                "name": c.name,
+                "role_title": c.role_title,
+                "email": c.email,
+                "phone": c.phone,
+                "notes": c.notes,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in self.customer_contacts.all()
+        ]
         evidence_list = [
             {
                 "id": e.id,
@@ -236,6 +283,10 @@ class Project(models.Model):
             "ticket_id": self.ticket_id,
             "ticket_link": self.ticket_link,
             "summary": self.summary,
+            "action_plan": self.action_plan,
+            "key_customer_contacts": self.key_customer_contacts,
+            "customer_contacts": contacts_list,
+            "related_escalated_incidents": related_incidents_list,
             "key_assets_affected": self.key_assets_affected,
             "key_users_affected": self.key_users_affected,
             "key_malicious_indicators": self.key_malicious_indicators,
@@ -294,6 +345,44 @@ class Project(models.Model):
         )
 
 
+class RelatedIncident(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='related_incidents',
+    )
+    title = models.CharField(max_length=255)
+    link = models.CharField(max_length=1024, blank=True, default="")
+    analyst_name = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Related Incident for Project #{self.project_id}: {self.title}"
+
+
+class CustomerContact(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='customer_contacts',
+    )
+    name = models.CharField(max_length=255)
+    role_title = models.CharField(max_length=255, blank=True, default="")
+    email = models.CharField(max_length=255, blank=True, default="")
+    phone = models.CharField(max_length=128, blank=True, default="")
+    notes = models.CharField(max_length=512, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Contact for Project #{self.project_id}: {self.name}"
+
+
 class ExternalResearch(models.Model):
     project = models.ForeignKey(
         Project,
@@ -347,9 +436,9 @@ class EvidenceItem(models.Model):
     malicious_hosts_ips = models.TextField(blank=True, default="")
     commands_run = models.TextField(blank=True, default="")
 
-    # Optional MITRE ATT&CK Tactics and Techniques
-    mitre_tactic = models.CharField(max_length=255, blank=True, default="")
-    mitre_technique = models.CharField(max_length=255, blank=True, default="")
+    # Optional MITRE ATT&CK Tactics and Techniques (supports multiple selections separated by '; ')
+    mitre_tactic = models.TextField(blank=True, default="")
+    mitre_technique = models.TextField(blank=True, default="")
 
     # Links (Atomic uses related_log_link; Search uses search_result_link and search_query_link)
     related_log_link = models.CharField(max_length=1024, blank=True, default="")

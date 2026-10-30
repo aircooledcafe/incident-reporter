@@ -9,6 +9,8 @@ from rest_framework import serializers
 from .models import (
     UserProfile,
     Project,
+    RelatedIncident,
+    CustomerContact,
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
@@ -31,6 +33,9 @@ class AuthUserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     role_display = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
+    preferred_display_name = serializers.SerializerMethodField()
+    pronouns = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
 
     class Meta:
@@ -42,6 +47,9 @@ class AuthUserSerializer(serializers.ModelSerializer):
             'first_name',
             'last_name',
             'display_name',
+            'preferred_display_name',
+            'pronouns',
+            'avatar_url',
             'role',
             'role_display',
             'is_active',
@@ -61,6 +69,18 @@ class AuthUserSerializer(serializers.ModelSerializer):
     def get_display_name(self, obj) -> str:
         return get_user_display_name(obj)
 
+    def get_preferred_display_name(self, obj) -> str:
+        return get_or_create_user_profile(obj).preferred_display_name or ""
+
+    def get_pronouns(self, obj) -> str:
+        return get_or_create_user_profile(obj).pronouns or ""
+
+    def get_avatar_url(self, obj) -> str:
+        profile = get_or_create_user_profile(obj)
+        if not profile.avatar:
+            return ""
+        return f"{settings.MEDIA_URL}{profile.avatar.name}"
+
     def get_permissions(self, obj) -> dict:
         return build_user_permissions_summary(obj)
 
@@ -73,6 +93,15 @@ class ManagedUserSerializer(serializers.ModelSerializer):
     )
     role_display = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
+    preferred_display_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
+    pronouns = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
+    avatar_url = serializers.SerializerMethodField()
     password = serializers.CharField(
         write_only=True,
         required=False,
@@ -91,6 +120,9 @@ class ManagedUserSerializer(serializers.ModelSerializer):
             'first_name',
             'last_name',
             'display_name',
+            'preferred_display_name',
+            'pronouns',
+            'avatar_url',
             'role',
             'role_display',
             'is_active',
@@ -103,6 +135,7 @@ class ManagedUserSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id',
             'display_name',
+            'avatar_url',
             'role_display',
             'last_login',
             'date_joined',
@@ -111,9 +144,10 @@ class ManagedUserSerializer(serializers.ModelSerializer):
         ]
 
     def to_representation(self, instance):
-        # Ensure `role` can be read off the User instance cleanly via UserProfile
         profile = get_or_create_user_profile(instance)
         instance.role = profile.role
+        instance.preferred_display_name = profile.preferred_display_name
+        instance.pronouns = profile.pronouns
         return super().to_representation(instance)
 
     def get_role_display(self, obj) -> str:
@@ -121,6 +155,12 @@ class ManagedUserSerializer(serializers.ModelSerializer):
 
     def get_display_name(self, obj) -> str:
         return get_user_display_name(obj)
+
+    def get_avatar_url(self, obj) -> str:
+        profile = get_or_create_user_profile(obj)
+        if not profile.avatar:
+            return ""
+        return f"{settings.MEDIA_URL}{profile.avatar.name}"
 
     def get_can_actor_modify(self, obj) -> bool:
         request = self.context.get('request')
@@ -179,6 +219,8 @@ class ManagedUserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         role = validated_data.pop('role', UserProfile.ROLE_ANALYST)
+        preferred_display_name = validated_data.pop('preferred_display_name', '')
+        pronouns = validated_data.pop('pronouns', '')
         password = validated_data.pop('password')
         is_super = role == UserProfile.ROLE_SUPER_ADMIN
         user = User(
@@ -193,14 +235,17 @@ class ManagedUserSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         profile = get_or_create_user_profile(user)
-        if profile.role != role:
-            profile.role = role
-            profile.save(update_fields=['role', 'updated_at'])
+        profile.role = role
+        profile.preferred_display_name = preferred_display_name
+        profile.pronouns = pronouns
+        profile.save(update_fields=['role', 'preferred_display_name', 'pronouns', 'updated_at'])
         sync_user_flags_for_role(user, role)
         return user
 
     def update(self, instance, validated_data):
         role = validated_data.pop('role', None)
+        preferred_display_name = validated_data.pop('preferred_display_name', None)
+        pronouns = validated_data.pop('pronouns', None)
         password = validated_data.pop('password', None)
 
         for attr, value in validated_data.items():
@@ -212,9 +257,18 @@ class ManagedUserSerializer(serializers.ModelSerializer):
         instance.save()
 
         profile = get_or_create_user_profile(instance)
+        changed = False
         if role is not None and profile.role != role:
             profile.role = role
-            profile.save(update_fields=['role', 'updated_at'])
+            changed = True
+        if preferred_display_name is not None and profile.preferred_display_name != preferred_display_name:
+            profile.preferred_display_name = preferred_display_name
+            changed = True
+        if pronouns is not None and profile.pronouns != pronouns:
+            profile.pronouns = pronouns
+            changed = True
+        if changed:
+            profile.save()
 
         sync_user_flags_for_role(instance, profile.role)
         return instance
@@ -286,6 +340,36 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at', 'evidence_type_display', 'screenshots']
 
 
+class RelatedIncidentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RelatedIncident
+        fields = [
+            'id',
+            'project',
+            'title',
+            'link',
+            'analyst_name',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class CustomerContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomerContact
+        fields = [
+            'id',
+            'project',
+            'name',
+            'role_title',
+            'email',
+            'phone',
+            'notes',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
 class ExternalResearchSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExternalResearch
@@ -301,6 +385,8 @@ class ExternalResearchSerializer(serializers.ModelSerializer):
 
 
 class ProjectSerializer(serializers.ModelSerializer):
+    related_incidents = RelatedIncidentSerializer(many=True, read_only=True)
+    customer_contacts = CustomerContactSerializer(many=True, read_only=True)
     external_research_items = ExternalResearchSerializer(many=True, read_only=True)
     timeline_evidence = serializers.SerializerMethodField()
     evidence_count = serializers.SerializerMethodField()
@@ -325,6 +411,10 @@ class ProjectSerializer(serializers.ModelSerializer):
             'ticket_id',
             'ticket_link',
             'summary',
+            'action_plan',
+            'key_customer_contacts',
+            'customer_contacts',
+            'related_incidents',
             'key_assets_affected',
             'key_users_affected',
             'key_malicious_indicators',

@@ -1,3 +1,5 @@
+from PIL import Image as PilImage
+from django.conf import settings
 from django.contrib.auth import (
     authenticate,
     get_user_model,
@@ -16,6 +18,7 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -180,6 +183,65 @@ class LogoutAPIView(APIView):
         })
 
 
+class UserProfileAPIView(APIView):
+    """
+    Allows any authenticated user to view and update their personal account preferences:
+      - preferred_display_name
+      - pronouns
+      - avatar (upload image or remove existing avatar)
+      - first_name, last_name, email
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get(self, request):
+        return Response(AuthUserSerializer(request.user).data)
+
+    def patch(self, request):
+        user = request.user
+        profile = get_or_create_user_profile(user)
+
+        user_fields_updated = []
+        for field in ('first_name', 'last_name', 'email'):
+            if field in request.data:
+                setattr(user, field, (request.data.get(field) or '').strip())
+                user_fields_updated.append(field)
+        if user_fields_updated:
+            user.save(update_fields=user_fields_updated)
+
+        if 'preferred_display_name' in request.data:
+            profile.preferred_display_name = (request.data.get('preferred_display_name') or '').strip()[:150]
+        if 'pronouns' in request.data:
+            profile.pronouns = (request.data.get('pronouns') or '').strip()[:64]
+
+        remove_avatar_val = str(request.data.get('remove_avatar', '')).strip().lower()
+        if remove_avatar_val in ('1', 'true', 'yes'):
+            profile.delete_avatar_file()
+            profile.avatar = None
+
+        avatar_file = request.FILES.get('avatar')
+        if avatar_file is not None:
+            if avatar_file.size > 5 * 1024 * 1024:
+                return Response(
+                    {"avatar": ["Avatar image must be 5 MB or smaller."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                img = PilImage.open(avatar_file)
+                img.verify()
+                avatar_file.seek(0)
+            except Exception:
+                return Response(
+                    {"avatar": ["Uploaded file is not a valid image."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            profile.delete_avatar_file()
+            profile.avatar = avatar_file
+
+        profile.save()
+        return Response(AuthUserSerializer(user).data)
+
+
 class ChangeOwnPasswordAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -256,6 +318,8 @@ class AnalystDirectoryAPIView(APIView):
                     "id": u.pk,
                     "username": u.username,
                     "display_name": get_user_display_name(u),
+                    "pronouns": profile.pronouns or "",
+                    "avatar_url": f"{settings.MEDIA_URL}{profile.avatar.name}" if profile.avatar else "",
                     "role": profile.role,
                     "role_display": profile.get_role_display(),
                 })

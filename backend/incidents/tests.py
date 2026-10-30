@@ -308,17 +308,173 @@ class IncidentReporterTests(TestCase):
         self.assertEqual(del_res.status_code, 204)
         self.assertEqual(ev_earlier.screenshots.count(), 0)
 
-    def test_seed_demo_creates_20_events_7_key_and_removable_research(self):
+    def test_seed_demo_super_admin_only_and_all_four_scenarios(self):
+        # Executive, Analyst, and Admin MUST be denied access to sample incident seeding
+        for non_super in (self.exec_user, self.analyst_user, self.admin_user):
+            self.client.force_authenticate(user=non_super)
+            self.assertEqual(self.client.get("/api/projects/demo_scenarios/").status_code, 403)
+            self.assertEqual(self.client.post("/api/projects/seed_demo/").status_code, 403)
+
+        # Super Admin CAN list and load all 4 themed sample scenarios
+        self.client.force_authenticate(user=self.super_admin)
+        cat_res = self.client.get("/api/projects/demo_scenarios/")
+        self.assertEqual(cat_res.status_code, 200)
+        scenario_ids = [s["id"] for s in cat_res.json()]
+        self.assertEqual(scenario_ids, ["expanse", "star_trek", "matrix", "star_wars"])
+
+        # 1. Expanse scenario (default)
+        expanse_res = self.client.post("/api/projects/seed_demo/", {"scenario": "expanse"}, format="json")
+        self.assertEqual(expanse_res.status_code, 201)
+        expanse_data = expanse_res.json()
+        self.assertEqual(expanse_data["evidence_count"], 20)
+        self.assertEqual(expanse_data["key_evidence_count"], 7)
+        self.assertEqual(len(expanse_data["external_research_items"]), 3)
+        self.assertGreaterEqual(len(expanse_data["customer_contacts"]), 2)
+        self.assertGreaterEqual(len(expanse_data["related_incidents"]), 2)
+        self.assertTrue(expanse_data["action_plan"])
+
+        first_res_id = expanse_data["external_research_items"][0]["id"]
+        self.assertEqual(self.client.delete(f"/api/external-research/{first_res_id}/").status_code, 204)
+
+        # 2. Star Trek scenario (website compromise + web shells)
+        trek_res = self.client.post("/api/projects/seed_demo/", {"scenario": "star_trek"}, format="json")
+        self.assertEqual(trek_res.status_code, 201)
+        self.assertIn("Web Shell", trek_res.json()["title"])
+        self.assertGreaterEqual(trek_res.json()["key_evidence_count"], 4)
+
+        # 3. Matrix scenario (ClickFix -> DC takeover)
+        matrix_res = self.client.post("/api/projects/seed_demo/", {"scenario": "matrix"}, format="json")
+        self.assertEqual(matrix_res.status_code, 201)
+        self.assertIn("ClickFix", matrix_res.json()["title"])
+        self.assertGreaterEqual(matrix_res.json()["key_evidence_count"], 4)
+
+        # 4. Star Wars scenario (MitM phishing -> spam & multi-account takeover)
+        sw_res = self.client.post("/api/projects/seed_demo/", {"scenario": "star_wars"}, format="json")
+        self.assertEqual(sw_res.status_code, 201)
+        self.assertIn("MitM", sw_res.json()["title"])
+        self.assertGreaterEqual(sw_res.json()["key_evidence_count"], 4)
+
+    def test_profile_avatar_preferred_display_name_and_pronouns(self):
         self.client.force_authenticate(user=self.analyst_user)
-        res = self.client.post("/api/projects/seed_demo/")
-        self.assertEqual(res.status_code, 201)
-        data = res.json()
-        self.assertEqual(data["evidence_count"], 20)
-        self.assertEqual(data["key_evidence_count"], 7)
-        self.assertEqual(len(data["external_research_items"]), 3)
-        first_res_id = data["external_research_items"][0]["id"]
-        del_res = self.client.delete(f"/api/external-research/{first_res_id}/")
-        self.assertEqual(del_res.status_code, 204)
+        avatar_upload = SimpleUploadedFile(
+            "holden_avatar.png",
+            self._make_png_bytes(),
+            content_type="image/png",
+        )
+        patch_res = self.client.patch(
+            "/api/auth/profile/",
+            {
+                "preferred_display_name": "Capt. Jim Holden",
+                "pronouns": "he/him",
+                "avatar": avatar_upload,
+            },
+            format="multipart",
+        )
+        self.assertEqual(patch_res.status_code, 200)
+        profile_json = patch_res.json()
+        self.assertEqual(profile_json["preferred_display_name"], "Capt. Jim Holden")
+        self.assertEqual(profile_json["display_name"], "Capt. Jim Holden")
+        self.assertEqual(profile_json["pronouns"], "he/him")
+        self.assertTrue(profile_json["avatar_url"].startswith("/artifacts/avatars/"))
+
+        # Avatar file exists inside external ARTIFACTS_ROOT
+        rel_avatar = profile_json["avatar_url"].replace("/artifacts/", "", 1)
+        avatar_disk_path = Path(self.temp_artifacts_dir) / rel_avatar
+        self.assertTrue(avatar_disk_path.exists())
+
+        # Remove avatar cleans up disk file and resets avatar_url
+        rem_res = self.client.patch(
+            "/api/auth/profile/",
+            {"remove_avatar": "true"},
+            format="multipart",
+        )
+        self.assertEqual(rem_res.status_code, 200)
+        self.assertEqual(rem_res.json()["avatar_url"], "")
+        self.assertFalse(avatar_disk_path.exists())
+
+    def test_related_incidents_customer_contacts_action_plan_and_multi_mitre(self):
+        self.client.force_authenticate(user=self.analyst_user)
+        proj_res = self.client.post(
+            "/api/projects/",
+            {
+                "title": "Escalated Web Intrusion",
+                "customer_name": "Acme Orbital",
+                "action_plan": "1. Isolate web tier\n2. Collect Nginx access logs",
+                "key_customer_contacts": "24/7 Bridge: +1-555-0100",
+            },
+            format="json",
+        )
+        self.assertEqual(proj_res.status_code, 201)
+        proj_id = proj_res.json()["id"]
+
+        rel_res = self.client.post(
+            "/api/related-incidents/",
+            {
+                "project": proj_id,
+                "title": "SIEM-101: Initial WAF Alert",
+                "link": "https://soc.example/tickets/SIEM-101",
+            },
+            format="json",
+        )
+        self.assertEqual(rel_res.status_code, 201)
+        rel_id = rel_res.json()["id"]
+
+        contact_res = self.client.post(
+            "/api/customer-contacts/",
+            {
+                "project": proj_id,
+                "name": "Ellen Ripley",
+                "role_title": "Security Director",
+                "email": "ripley@acme-orbital.example",
+                "phone": "+1-555-0192",
+                "notes": "Primary incident commander",
+            },
+            format="json",
+        )
+        self.assertEqual(contact_res.status_code, 201)
+        contact_id = contact_res.json()["id"]
+
+        # Multi-select MITRE tactics and techniques on a single evidence item
+        ev_res = self.client.post(
+            "/api/evidence/",
+            {
+                "project": proj_id,
+                "evidence_type": "ATOMIC",
+                "summary": "Public exploit dropped web shell",
+                "affected_asset": "WEB-01 (10.10.2.5)",
+                "mitre_tactic": "Initial Access (TA0001); Persistence (TA0003)",
+                "mitre_technique": (
+                    "T1190 - Exploit Public-Facing Application; "
+                    "T1505.003 - Server Software Component: Web Shell"
+                ),
+                "is_key_evidence": True,
+            },
+            format="json",
+        )
+        self.assertEqual(ev_res.status_code, 201)
+
+        detail = self.client.get(f"/api/projects/{proj_id}/").json()
+        self.assertIn("Isolate web tier", detail["action_plan"])
+        self.assertEqual(len(detail["related_incidents"]), 1)
+        self.assertEqual(len(detail["customer_contacts"]), 1)
+
+        mitre_pairs = {(m["tactic"], m["technique"]) for m in detail["mitre_summary"]}
+        self.assertIn(
+            ("Initial Access (TA0001)", "T1190 - Exploit Public-Facing Application"),
+            mitre_pairs,
+        )
+        self.assertIn(
+            ("Persistence (TA0003)", "T1505.003 - Server Software Component: Web Shell"),
+            mitre_pairs,
+        )
+
+        # Locking project blocks adding/removing related incidents and contacts
+        self.client.force_authenticate(user=self.admin_user)
+        self.assertEqual(self.client.post(f"/api/projects/{proj_id}/lock/").status_code, 200)
+
+        self.client.force_authenticate(user=self.analyst_user)
+        self.assertEqual(self.client.delete(f"/api/related-incidents/{rel_id}/").status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/customer-contacts/{contact_id}/").status_code, 403)
 
     def test_executive_role_read_only_and_report_export(self):
         project = Project.objects.create(title="Executive Review Case", ticket_id="SOC-1")

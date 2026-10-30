@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useEventCallback from '@restart/hooks/useEventCallback';
 import {
   Navbar,
@@ -13,7 +13,6 @@ import {
   Modal,
   Alert,
   Nav,
-  InputGroup,
   Spinner,
 } from 'react-bootstrap';
 import {
@@ -35,9 +34,17 @@ import {
   LogOut,
   Database,
   UserPlus,
-  RefreshCw,
+  Home,
+  FolderOpen,
+  Sparkles,
+  Settings,
 } from 'lucide-react';
 import { api } from './api';
+import HomeDashboard from './HomeDashboard';
+import AccountProfileModal from './AccountProfileModal';
+import ProjectOverviewExtras from './ProjectOverviewExtras';
+import { MitreTacticsSelect, MitreTechniquesSelect } from './MitreMultiSelect';
+import { splitMitreValues } from './mitreData';
 
 const STATUS_LABELS = {
   OPEN: 'Open / Triage',
@@ -60,6 +67,29 @@ const ROLE_BADGE_BG = {
   EXECUTIVE: 'secondary',
 };
 
+const DEFAULT_DEMO_SCENARIOS = [
+  {
+    id: 'expanse',
+    theme: 'The Expanse',
+    label: 'The Expanse — VPN Intrusion, AD Compromise & Exfiltration',
+  },
+  {
+    id: 'star_trek',
+    theme: 'Star Trek',
+    label: 'Star Trek — Website Compromise & Web Shell Deployment',
+  },
+  {
+    id: 'matrix',
+    theme: 'The Matrix',
+    label: 'The Matrix — ClickFix User Compromise to DC Takeover',
+  },
+  {
+    id: 'star_wars',
+    theme: 'Star Wars',
+    label: 'Star Wars — MitM Phishing, Spam Wave & Multi-Account Takeover',
+  },
+];
+
 const EMPTY_PROJECT_FORM = {
   title: '',
   customer_name: '',
@@ -67,6 +97,8 @@ const EMPTY_PROJECT_FORM = {
   ticket_id: '',
   ticket_link: '',
   summary: '',
+  action_plan: '',
+  key_customer_contacts: '',
   key_assets_affected: '',
   key_users_affected: '',
   key_malicious_indicators: '',
@@ -205,8 +237,8 @@ export default function App() {
     confirm_password: '',
   });
 
-  // Main section switcher ('investigations' | 'users')
-  const [mainView, setMainView] = useState('investigations');
+  // Main section switcher ('home' | 'investigations' | 'users') — defaults to top-level Homepage
+  const [mainView, setMainView] = useState('home');
 
   // Investigation Data State
   const [projects, setProjects] = useState([]);
@@ -214,9 +246,17 @@ export default function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'timeline' | 'reports'
   const [analystDirectory, setAnalystDirectory] = useState([]);
+  const [demoScenarios, setDemoScenarios] = useState(DEFAULT_DEMO_SCENARIOS);
 
-  // Sidebar Archived/Closed filter (hidden by default)
+  // Sidebar Archived/Closed & Locked filters (both hidden by default)
   const [showArchivedSidebar, setShowArchivedSidebar] = useState(false);
+  const [showLockedSidebar, setShowLockedSidebar] = useState(false);
+
+  // Navbar dropdown states & outside-click refs
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [showDemoDropdown, setShowDemoDropdown] = useState(false);
+  const userDropdownRef = useRef(null);
+  const demoDropdownRef = useRef(null);
 
   // Header status picker, Archive warning, & Project delete confirmation modal state
   const [showHeaderStatusPicker, setShowHeaderStatusPicker] = useState(false);
@@ -266,15 +306,8 @@ export default function App() {
   // Delete User Confirmation Modal
   const [deleteTargetUser, setDeleteTargetUser] = useState(null);
 
-  // Self Account / Password / API Token Modal
+  // Self Account / Profile / Password / API Token Modal
   const [showAccountModal, setShowAccountModal] = useState(false);
-  const [ownPasswordForm, setOwnPasswordForm] = useState({
-    current_password: '',
-    new_password: '',
-    confirm_password: '',
-  });
-  const [apiTokenValue, setApiTokenValue] = useState('');
-  const [apiTokenLoading, setApiTokenLoading] = useState(false);
 
   // Derived permissions & lock state
   const perms = authUser?.permissions || {};
@@ -284,10 +317,24 @@ export default function App() {
   const canManageUsers = Boolean(perms.can_manage_users);
   const canManageAdmins = Boolean(perms.can_manage_admins);
   const canAccessDbAdmin = Boolean(perms.can_access_db_admin);
+  const canSeedDemo = Boolean(perms.can_seed_demo);
 
   const isProjectLocked = Boolean(activeProject?.is_locked);
   const canModifyActiveProject = canEditRole && !isProjectLocked;
   const currentAnalystName = authUser?.display_name || authUser?.username || '';
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target)) {
+        setShowUserDropdown(false);
+      }
+      if (demoDropdownRef.current && !demoDropdownRef.current.contains(e.target)) {
+        setShowDemoDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
   const notifySuccess = useEventCallback((msg) => {
     setSuccessMsg(msg);
@@ -312,13 +359,26 @@ export default function App() {
     }
   });
 
+  const loadDemoScenarios = useEventCallback(async () => {
+    if (!canSeedDemo) return;
+    try {
+      const list = await api.getDemoScenarios();
+      if (Array.isArray(list) && list.length > 0) {
+        setDemoScenarios(list);
+      }
+    } catch {
+      // Fall back to built-in catalog metadata
+    }
+  });
+
   const loadProjects = useEventCallback(async (selectId = null, clearSelection = false) => {
     try {
       setLoading(true);
       const list = await api.listProjects();
       setProjects(list);
+      const openUnlocked = list.filter((p) => p.status !== 'ARCHIVED' && !p.is_locked);
       const nonArchived = list.filter((p) => p.status !== 'ARCHIVED');
-      const defaultFirst = nonArchived[0] || list[0];
+      const defaultFirst = openUnlocked[0] || nonArchived[0] || list[0];
       const candidateId = clearSelection
         ? selectId || (defaultFirst && defaultFirst.id)
         : selectId || selectedProjectId || (defaultFirst && defaultFirst.id);
@@ -375,18 +435,21 @@ export default function App() {
     initializeSession();
   }, [initializeSession]);
 
+  const authUserId = authUser?.id || null;
+
   useEffect(() => {
-    if (authUser) {
+    if (authUserId) {
       loadProjects(null, true);
       loadAnalystDirectory();
+      loadDemoScenarios();
     } else {
       setProjects([]);
       setSelectedProjectId(null);
       setActiveProject(null);
       setManagedUsers([]);
-      setMainView('investigations');
+      setMainView('home');
     }
-  }, [authUser, loadProjects, loadAnalystDirectory]);
+  }, [authUserId, loadProjects, loadAnalystDirectory, loadDemoScenarios]);
 
   useEffect(() => {
     if (authUser && mainView === 'users' && canManageUsers) {
@@ -402,6 +465,7 @@ export default function App() {
     try {
       const res = await api.login(loginUsername.trim(), loginPassword);
       setLoginPassword('');
+      setMainView('home');
       setAuthUser(res.user);
       setNeedsInitialSetup(false);
     } catch (err) {
@@ -436,6 +500,7 @@ export default function App() {
         confirm_password: '',
       });
       setNeedsInitialSetup(false);
+      setMainView('home');
       setAuthUser(res.user);
       notifySuccess('Initial Super Admin account created.');
     } catch (err) {
@@ -446,6 +511,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    setShowUserDropdown(false);
     try {
       await api.logout();
     } catch {
@@ -460,51 +526,14 @@ export default function App() {
     }
   };
 
-  const openAccountSettings = async () => {
-    setOwnPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+  const openAccountSettings = () => {
+    setShowUserDropdown(false);
     setShowAccountModal(true);
-    if (canEditRole) {
-      try {
-        setApiTokenLoading(true);
-        const res = await api.getApiToken();
-        setApiTokenValue(res.token || '');
-      } catch {
-        setApiTokenValue('');
-      } finally {
-        setApiTokenLoading(false);
-      }
-    }
   };
 
-  const handleRotateApiToken = async () => {
-    try {
-      setApiTokenLoading(true);
-      const res = await api.rotateApiToken();
-      setApiTokenValue(res.token || '');
-      notifySuccess('SOC ingestion API token rotated.');
-    } catch (err) {
-      handleApiError(err, 'Failed to rotate API token');
-    } finally {
-      setApiTokenLoading(false);
-    }
-  };
-
-  const handleChangeOwnPassword = async (e) => {
-    e.preventDefault();
-    if (ownPasswordForm.new_password !== ownPasswordForm.confirm_password) {
-      setErrorMsg('New password and confirmation do not match.');
-      return;
-    }
-    try {
-      await api.changeOwnPassword({
-        current_password: ownPasswordForm.current_password,
-        new_password: ownPasswordForm.new_password,
-      });
-      setShowAccountModal(false);
-      notifySuccess('Your password has been updated.');
-    } catch (err) {
-      handleApiError(err, 'Could not change password');
-    }
+  const handleProfileUpdated = async (updatedUser) => {
+    setAuthUser(updatedUser);
+    await loadAnalystDirectory();
   };
 
   // --- User Management Handlers ---
@@ -599,6 +628,8 @@ export default function App() {
       const detail = await api.getProject(id);
       setSelectedProjectId(detail.id);
       setActiveProject(detail);
+      const list = await api.listProjects().catch(() => null);
+      if (list) setProjects(list);
     } catch (err) {
       handleApiError(err, `Could not load project #${id}`);
     } finally {
@@ -606,12 +637,26 @@ export default function App() {
     }
   });
 
-  const handleSeedDemo = useEventCallback(async () => {
+  const handleOpenInvestigationFromHome = useEventCallback(async (id) => {
+    setMainView('investigations');
+    setActiveTab('overview');
+    await handleSelectProject(id);
+  });
+
+  const handleSeedDemo = useEventCallback(async (scenarioKey = 'expanse') => {
+    if (!canSeedDemo) return;
+    setShowDemoDropdown(false);
     try {
       setLoading(true);
-      const created = await api.seedDemoProject();
-      await loadProjects(created.id);
-      notifySuccess('Demo incident loaded (20 total events, 7 Key Evidence events).');
+      const result = await api.seedDemoProject(scenarioKey);
+      const primaryId = result?.primary?.id || result?.id;
+      await loadProjects(primaryId);
+      if (scenarioKey === 'all') {
+        notifySuccess(`Loaded all ${result?.count || 4} themed sample incidents.`);
+      } else {
+        notifySuccess(`Sample incident loaded: "${result?.title || scenarioKey}".`);
+        setMainView('investigations');
+      }
     } catch (err) {
       handleApiError(err, 'Failed to load sample project');
     } finally {
@@ -629,7 +674,7 @@ export default function App() {
       await loadProjects(updated.id);
       notifySuccess(
         updated.is_locked
-          ? 'Project locked (now read-only for all users).'
+          ? 'Project locked (read-only). Toggle "Show Locked" in the sidebar to list locked items.'
           : 'Project unlocked (editing restored).',
       );
     } catch (err) {
@@ -694,6 +739,8 @@ export default function App() {
       ticket_id: activeProject.ticket_id || '',
       ticket_link: activeProject.ticket_link || '',
       summary: activeProject.summary || '',
+      action_plan: activeProject.action_plan || '',
+      key_customer_contacts: activeProject.key_customer_contacts || '',
       key_assets_affected: activeProject.key_assets_affected || '',
       key_users_affected: activeProject.key_users_affected || '',
       key_malicious_indicators: activeProject.key_malicious_indicators || '',
@@ -715,6 +762,7 @@ export default function App() {
       } else {
         const created = await api.createProject(projectForm);
         await loadProjects(created.id);
+        setMainView('investigations');
         notifySuccess(`Created project "${created.title || '#' + created.id}".`);
       }
       setShowProjectModal(false);
@@ -1078,11 +1126,29 @@ export default function App() {
     );
   }
 
-  // Sidebar projects filtering (hide ARCHIVED by default unless showArchivedSidebar is enabled)
-  const archivedCount = projects.filter((p) => p.status === 'ARCHIVED').length;
-  const visibleSidebarProjects = projects.filter(
-    (p) => showArchivedSidebar || p.status !== 'ARCHIVED',
-  );
+  // Sidebar projects filtering:
+  // Locked projects are hidden by default unless showLockedSidebar is enabled.
+  // Archived (unlocked) projects are hidden by default unless showArchivedSidebar is enabled.
+  const lockedCount = projects.filter((p) => Boolean(p.is_locked)).length;
+  const archivedCount = projects.filter((p) => !p.is_locked && p.status === 'ARCHIVED').length;
+  const visibleSidebarProjects = projects.filter((p) => {
+    if (p.is_locked) {
+      return showLockedSidebar;
+    }
+    if (p.status === 'ARCHIVED') {
+      return showArchivedSidebar;
+    }
+    return true;
+  });
+
+  const userInitials = (() => {
+    const src = currentAnalystName || '?';
+    const parts = src.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }
+    return src.slice(0, 2).toUpperCase();
+  })();
 
   const timelineItems = activeProject?.timeline_evidence || [];
 
@@ -1186,82 +1252,185 @@ export default function App() {
       <Navbar className="soc-navbar py-2 px-3" variant="dark" expand="lg">
         <Container fluid>
           <div className="d-flex align-items-center gap-3 flex-wrap">
-            <Navbar.Brand className="fw-semibold text-white me-1">
+            <Navbar.Brand
+              role="button"
+              onClick={() => setMainView('home')}
+              className="fw-semibold text-white me-1"
+              style={{ cursor: 'pointer' }}
+            >
               Incident Response Evidence Recorder
             </Navbar.Brand>
 
-            {canManageUsers && (
-              <div className="d-flex align-items-center gap-1">
-                <Button
-                  size="sm"
-                  className={mainView === 'investigations' ? 'btn-lb-primary' : ''}
-                  variant={mainView === 'investigations' ? undefined : 'outline-secondary'}
-                  onClick={() => setMainView('investigations')}
-                >
-                  Investigations
-                </Button>
-                <Button
-                  size="sm"
-                  className={mainView === 'users' ? 'btn-lb-primary' : ''}
-                  variant={mainView === 'users' ? undefined : 'outline-secondary'}
-                  onClick={() => setMainView('users')}
-                >
-                  <Users size={14} className="me-1" />
-                  Users
-                </Button>
-              </div>
-            )}
+            <div className="d-flex align-items-center gap-1">
+              <Button
+                size="sm"
+                className={mainView === 'home' ? 'btn-lb-primary' : ''}
+                variant={mainView === 'home' ? undefined : 'outline-secondary'}
+                onClick={() => setMainView('home')}
+              >
+                <Home size={14} className="me-1" />
+                Home
+              </Button>
+              <Button
+                size="sm"
+                className={mainView === 'investigations' ? 'btn-lb-primary' : ''}
+                variant={mainView === 'investigations' ? undefined : 'outline-secondary'}
+                onClick={() => setMainView('investigations')}
+              >
+                <FolderOpen size={14} className="me-1" />
+                Investigations
+              </Button>
+            </div>
           </div>
 
           <div className="d-flex align-items-center flex-wrap gap-2 ms-auto mt-2 mt-lg-0">
-            {mainView === 'investigations' && canEditRole && (
-              <>
-                <Button className="btn-lb-cyan" size="sm" onClick={handleSeedDemo}>
-                  Load Sample Incident
+            {/* Super Admin Only: Load Sample Incident Dropdown (4 Themed Scenarios) */}
+            {canSeedDemo && (
+              <div className="position-relative" ref={demoDropdownRef}>
+                <Button
+                  className="btn-lb-cyan d-inline-flex align-items-center gap-1"
+                  size="sm"
+                  onClick={() => setShowDemoDropdown((prev) => !prev)}
+                >
+                  <Sparkles size={14} />
+                  <span>Load Sample Incident</span>
+                  <ChevronDown size={13} />
                 </Button>
-                <Button className="btn-lb-primary" size="sm" onClick={openNewProjectModal}>
-                  <Plus size={15} className="me-1" />
-                  New Project
-                </Button>
-              </>
+
+                {showDemoDropdown && (
+                  <div className="soc-dropdown-panel shadow-lg p-2" style={{ minWidth: '340px' }}>
+                    <div className="px-2 py-1 small text-secondary border-bottom border-secondary mb-1">
+                      Super Admin Demo Scenarios
+                    </div>
+                    {demoScenarios.map((sc) => (
+                      <button
+                        key={sc.id}
+                        type="button"
+                        className="soc-dropdown-item flex-column align-items-start gap-0"
+                        onClick={() => handleSeedDemo(sc.id)}
+                      >
+                        <span className="fw-semibold text-lb-cyan">{sc.label}</span>
+                        {sc.customer_name && (
+                          <span className="text-secondary" style={{ fontSize: '0.75rem' }}>
+                            Customer: {sc.customer_name}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                    <div className="border-top border-secondary mt-1 pt-1">
+                      <button
+                        type="button"
+                        className="soc-dropdown-item text-lb-lime fw-semibold"
+                        onClick={() => handleSeedDemo('all')}
+                      >
+                        <Sparkles size={14} />
+                        <span>Load All 4 Sample Incidents</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
-            {canAccessDbAdmin && (
-              <Button
-                as="a"
-                href="/admin/"
-                target="_blank"
-                rel="noreferrer"
-                variant="outline-secondary"
-                size="sm"
-                title="Open Django Raw Database Admin (Super Admin Only)"
-              >
-                <Database size={14} className="me-1" />
-                DB Admin
+            {canEditRole && (
+              <Button className="btn-lb-primary" size="sm" onClick={openNewProjectModal}>
+                <Plus size={15} className="me-1" />
+                New Project
               </Button>
             )}
 
-            <div className="d-flex align-items-center gap-2 px-2 py-1 rounded soc-subbox">
-              <span className="small text-white fw-semibold">{currentAnalystName}</span>
-              <Badge bg={ROLE_BADGE_BG[authUser.role] || 'secondary'} style={{ fontSize: '0.7rem' }}>
-                {ROLE_LABELS[authUser.role] || authUser.role}
-              </Badge>
+            {/* User Name Dropdown Menu (Account, Avatar/Profile, User Admin, DB Admin, Sign Out) */}
+            <div className="position-relative" ref={userDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setShowUserDropdown((prev) => !prev)}
+                className="user-menu-trigger d-inline-flex align-items-center gap-2"
+                title="Open account and user options"
+              >
+                {authUser.avatar_url ? (
+                  <img
+                    src={authUser.avatar_url}
+                    alt={currentAnalystName}
+                    className="user-avatar-circle"
+                  />
+                ) : (
+                  <span className="user-avatar-circle">{userInitials}</span>
+                )}
+                <span className="small text-white fw-semibold">{currentAnalystName}</span>
+                {authUser.pronouns && (
+                  <span className="text-secondary" style={{ fontSize: '0.74rem' }}>
+                    ({authUser.pronouns})
+                  </span>
+                )}
+                <Badge bg={ROLE_BADGE_BG[authUser.role] || 'secondary'} style={{ fontSize: '0.68rem' }}>
+                  {ROLE_LABELS[authUser.role] || authUser.role}
+                </Badge>
+                <ChevronDown size={14} className="text-secondary" />
+              </button>
+
+              {showUserDropdown && (
+                <div className="soc-dropdown-panel shadow-lg p-2">
+                  <div className="px-2 py-2 border-bottom border-secondary mb-1">
+                    <div className="fw-semibold text-white small">
+                      {currentAnalystName}
+                      {authUser.pronouns ? ` (${authUser.pronouns})` : ''}
+                    </div>
+                    <div className="mono-text text-secondary" style={{ fontSize: '0.75rem' }}>
+                      @{authUser.username}
+                      {authUser.email ? ` • ${authUser.email}` : ''}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="soc-dropdown-item"
+                    onClick={openAccountSettings}
+                  >
+                    <Settings size={15} className="text-lb-cyan" />
+                    <span>Account, Avatar &amp; Preferences</span>
+                  </button>
+
+                  {canManageUsers && (
+                    <button
+                      type="button"
+                      className="soc-dropdown-item"
+                      onClick={() => {
+                        setShowUserDropdown(false);
+                        setMainView('users');
+                      }}
+                    >
+                      <Users size={15} className="text-lb-cyan" />
+                      <span>User &amp; Role Management</span>
+                    </button>
+                  )}
+
+                  {canAccessDbAdmin && (
+                    <a
+                      href="/admin/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="soc-dropdown-item"
+                      onClick={() => setShowUserDropdown(false)}
+                    >
+                      <Database size={15} className="text-lb-cyan" />
+                      <span>Django Database Admin</span>
+                      <ExternalLink size={12} className="ms-auto text-secondary" />
+                    </a>
+                  )}
+
+                  <div className="border-top border-secondary mt-1 pt-1">
+                    <button
+                      type="button"
+                      className="soc-dropdown-item text-danger"
+                      onClick={handleLogout}
+                    >
+                      <LogOut size={15} />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-
-            <Button
-              variant="outline-light"
-              size="sm"
-              onClick={openAccountSettings}
-              title="Change Password & API Token"
-            >
-              <KeyRound size={14} className="me-1" />
-              Account
-            </Button>
-
-            <Button variant="outline-secondary" size="sm" onClick={handleLogout}>
-              <LogOut size={14} className="me-1" />
-              Sign Out
-            </Button>
           </div>
         </Container>
       </Navbar>
@@ -1290,8 +1459,20 @@ export default function App() {
           </Alert>
         )}
 
-        {/* ==================== USER MANAGEMENT VIEW (ADMIN & SUPER ADMIN) ==================== */}
-        {mainView === 'users' && canManageUsers ? (
+        {/* ==================== TOP-LEVEL HOMEPAGE (DEFAULT VIEW) ==================== */}
+        {mainView === 'home' ? (
+          <HomeDashboard
+            projects={projects}
+            loading={loading}
+            canEditRole={canEditRole}
+            canSeedDemo={canSeedDemo}
+            onOpenInvestigation={handleOpenInvestigationFromHome}
+            onOpenNewProject={openNewProjectModal}
+            onSeedDemoScenario={handleSeedDemo}
+            demoScenarios={demoScenarios}
+          />
+        ) : mainView === 'users' && canManageUsers ? (
+          /* ==================== USER MANAGEMENT VIEW (ADMIN & SUPER ADMIN) ==================== */
           <Card className="soc-card">
             <Card.Header className="soc-card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
               <div>
@@ -1317,7 +1498,7 @@ export default function App() {
                   <thead className="small text-secondary text-uppercase">
                     <tr>
                       <th>Username</th>
-                      <th>Display Name</th>
+                      <th>Display Name &amp; Pronouns</th>
                       <th>Email</th>
                       <th>Role</th>
                       <th>Status</th>
@@ -1329,14 +1510,28 @@ export default function App() {
                     {managedUsers.map((u) => (
                       <tr key={u.id}>
                         <td className="mono-text fw-semibold text-white">
-                          {u.username}{' '}
-                          {u.is_self && (
-                            <Badge bg="secondary" className="ms-1" style={{ fontSize: '0.68rem' }}>
-                              You
-                            </Badge>
+                          <div className="d-flex align-items-center gap-2">
+                            {u.avatar_url ? (
+                              <img src={u.avatar_url} alt={u.username} className="user-avatar-circle" />
+                            ) : (
+                              <span className="user-avatar-circle">
+                                {(u.display_name || u.username || '?').slice(0, 2).toUpperCase()}
+                              </span>
+                            )}
+                            <span>{u.username}</span>
+                            {u.is_self && (
+                              <Badge bg="secondary" style={{ fontSize: '0.68rem' }}>
+                                You
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <span>{u.display_name || '—'}</span>
+                          {u.pronouns && (
+                            <span className="text-secondary small ms-1">({u.pronouns})</span>
                           )}
                         </td>
-                        <td>{u.display_name || '—'}</td>
                         <td className="text-secondary small">{u.email || '—'}</td>
                         <td>
                           <Badge bg={ROLE_BADGE_BG[u.role] || 'secondary'}>
@@ -1397,7 +1592,7 @@ export default function App() {
             </Card.Body>
           </Card>
         ) : (
-          /* ==================== INVESTIGATIONS VIEW ==================== */
+          /* ==================== INVESTIGATIONS WORKSPACE VIEW ==================== */
           <Row className="g-4">
             {/* Left Sidebar: Projects List */}
             <Col lg={3} xl={2}>
@@ -1408,13 +1603,21 @@ export default function App() {
                       Projects ({visibleSidebarProjects.length})
                     </span>
                   </div>
-                  <div className="mt-2 pt-1 border-top border-secondary">
+                  <div className="mt-2 pt-1 border-top border-secondary d-flex flex-column gap-1">
                     <Form.Check
                       type="switch"
                       id="show-archived-switch"
                       label={`Show Archived (${archivedCount})`}
                       checked={showArchivedSidebar}
                       onChange={(e) => setShowArchivedSidebar(e.target.checked)}
+                      className="small text-secondary"
+                    />
+                    <Form.Check
+                      type="switch"
+                      id="show-locked-switch"
+                      label={`Show Locked (${lockedCount})`}
+                      checked={showLockedSidebar}
+                      onChange={(e) => setShowLockedSidebar(e.target.checked)}
                       className="small text-secondary"
                     />
                   </div>
@@ -1428,7 +1631,7 @@ export default function App() {
                     <div className="text-center py-3 px-2 text-secondary small">
                       <p className="mb-2">
                         {projects.length > 0
-                          ? 'No active investigations. Toggle "Show Archived" above to view closed projects.'
+                          ? 'No open unlocked investigations. Toggle "Show Archived" or "Show Locked" above.'
                           : 'No projects created yet.'}
                       </p>
                       {canEditRole && (
@@ -1511,19 +1714,21 @@ export default function App() {
                     </h5>
                     <p className="text-secondary small mb-3">
                       {canEditRole
-                        ? 'Create a new incident project or load the sample incident to begin recording evidence.'
+                        ? 'Create a new incident project or select one from the sidebar to begin recording evidence.'
                         : 'Select an investigation from the sidebar to review evidence and export reports.'}
                     </p>
-                    {canEditRole && (
-                      <div className="d-flex justify-content-center gap-2">
+                    <div className="d-flex justify-content-center gap-2">
+                      {canEditRole && (
                         <Button className="btn-lb-primary" onClick={openNewProjectModal}>
                           Create Project
                         </Button>
-                        <Button className="btn-lb-cyan" onClick={handleSeedDemo}>
+                      )}
+                      {canSeedDemo && (
+                        <Button className="btn-lb-cyan" onClick={() => handleSeedDemo('expanse')}>
                           Load Sample Incident
                         </Button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </Card.Body>
                 </Card>
               ) : (
@@ -1845,6 +2050,16 @@ export default function App() {
                         </Card.Body>
                       </Card>
 
+                      {/* Action Plan, Related Escalated Incidents & Key Customer Contacts */}
+                      <ProjectOverviewExtras
+                        activeProject={activeProject}
+                        canModifyActiveProject={canModifyActiveProject}
+                        currentAnalystName={currentAnalystName}
+                        onProjectMutated={handleSelectProject}
+                        onNotifySuccess={notifySuccess}
+                        onApiError={handleApiError}
+                      />
+
                       {/* External Research Links & Summaries */}
                       <Card className="soc-card">
                         <Card.Header className="soc-card-header">
@@ -2125,15 +2340,17 @@ export default function App() {
 
                                   <td className="small">
                                     {item.mitre_tactic || item.mitre_technique ? (
-                                      <div>
-                                        {item.mitre_tactic && (
-                                          <div className="fw-semibold">{item.mitre_tactic}</div>
-                                        )}
-                                        {item.mitre_technique && (
-                                          <div className="text-secondary mono-text">
-                                            {item.mitre_technique}
+                                      <div className="d-flex flex-column gap-1">
+                                        {splitMitreValues(item.mitre_tactic).map((tac, idx) => (
+                                          <div key={`tac-${idx}`} className="fw-semibold text-lb-cyan">
+                                            {tac}
                                           </div>
-                                        )}
+                                        ))}
+                                        {splitMitreValues(item.mitre_technique).map((tech, idx) => (
+                                          <div key={`tech-${idx}`} className="text-secondary mono-text">
+                                            {tech}
+                                          </div>
+                                        ))}
                                       </div>
                                     ) : (
                                       <span className="text-secondary">—</span>
@@ -2729,6 +2946,39 @@ export default function App() {
                 </Form.Group>
               </Col>
 
+              <Col md={7}>
+                <Form.Group>
+                  <Form.Label className="small">
+                    Action Plan (Next steps, areas to investigate, customer info needed)
+                  </Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={3}
+                    value={projectForm.action_plan}
+                    onChange={(e) =>
+                      setProjectForm({ ...projectForm, action_plan: e.target.value })
+                    }
+                  />
+                </Form.Group>
+              </Col>
+
+              <Col md={5}>
+                <Form.Group>
+                  <Form.Label className="small">
+                    Customer Bridge / Escalation Notes (Optional)
+                  </Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={3}
+                    placeholder="e.g. 24/7 SOC Bridge +1-555-0199; individual contacts can be added in Overview"
+                    value={projectForm.key_customer_contacts}
+                    onChange={(e) =>
+                      setProjectForm({ ...projectForm, key_customer_contacts: e.target.value })
+                    }
+                  />
+                </Form.Group>
+              </Col>
+
               <Col md={4}>
                 <Form.Group>
                   <Form.Label className="small">Key Assets Affected (one per line)</Form.Label>
@@ -2983,26 +3233,26 @@ export default function App() {
 
               <Col md={6}>
                 <Form.Group>
-                  <Form.Label className="small">MITRE Tactic (Optional)</Form.Label>
-                  <Form.Control
-                    type="text"
-                    placeholder="e.g. Credential Access (TA0006)"
+                  <Form.Label className="small">MITRE Tactics (Multi-Select)</Form.Label>
+                  <MitreTacticsSelect
                     value={evidenceForm.mitre_tactic}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, mitre_tactic: e.target.value })
+                    onChange={(nextTactics) =>
+                      setEvidenceForm((prev) => ({ ...prev, mitre_tactic: nextTactics }))
                     }
                   />
                 </Form.Group>
               </Col>
               <Col md={6}>
                 <Form.Group>
-                  <Form.Label className="small">MITRE Technique (Optional)</Form.Label>
-                  <Form.Control
-                    type="text"
-                    placeholder="e.g. T1003.001 - LSASS Memory"
+                  <Form.Label className="small">MITRE Techniques (Multi-Select)</Form.Label>
+                  <MitreTechniquesSelect
+                    tacticValue={evidenceForm.mitre_tactic}
                     value={evidenceForm.mitre_technique}
-                    onChange={(e) =>
-                      setEvidenceForm({ ...evidenceForm, mitre_technique: e.target.value })
+                    onChange={(nextTechniques) =>
+                      setEvidenceForm((prev) => ({ ...prev, mitre_technique: nextTechniques }))
+                    }
+                    onAutoAddTactic={(nextTactics) =>
+                      setEvidenceForm((prev) => ({ ...prev, mitre_tactic: nextTactics }))
                     }
                   />
                 </Form.Group>
@@ -3372,98 +3622,17 @@ export default function App() {
         </Modal.Footer>
       </Modal>
 
-      {/* Modal: Self Account Settings (Change Own Password & SOC API Token) */}
-      <Modal
+      {/* Modal: Self Account, Avatar, Display Name, Pronouns, Password & SOC API Token */}
+      <AccountProfileModal
         show={showAccountModal}
         onHide={() => setShowAccountModal(false)}
-        transition={false}
-        centered
-      >
-        <Modal.Header closeButton className="bg-dark border-secondary">
-          <Modal.Title className="fs-6">
-            Account Settings — {authUser.username} ({ROLE_LABELS[authUser.role] || authUser.role})
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="bg-dark">
-          <Form onSubmit={handleChangeOwnPassword} className="mb-3">
-            <div className="fw-semibold small text-lb-cyan mb-2">Change Your Password</div>
-            <Form.Group className="mb-2">
-              <Form.Label className="small">Current Password</Form.Label>
-              <Form.Control
-                type="password"
-                required
-                value={ownPasswordForm.current_password}
-                onChange={(e) =>
-                  setOwnPasswordForm({ ...ownPasswordForm, current_password: e.target.value })
-                }
-              />
-            </Form.Group>
-            <Form.Group className="mb-2">
-              <Form.Label className="small">New Password</Form.Label>
-              <Form.Control
-                type="password"
-                required
-                value={ownPasswordForm.new_password}
-                onChange={(e) =>
-                  setOwnPasswordForm({ ...ownPasswordForm, new_password: e.target.value })
-                }
-              />
-            </Form.Group>
-            <Form.Group className="mb-3">
-              <Form.Label className="small">Confirm New Password</Form.Label>
-              <Form.Control
-                type="password"
-                required
-                value={ownPasswordForm.confirm_password}
-                onChange={(e) =>
-                  setOwnPasswordForm({ ...ownPasswordForm, confirm_password: e.target.value })
-                }
-              />
-            </Form.Group>
-            <Button type="submit" className="btn-lb-primary" size="sm">
-              Update Password
-            </Button>
-          </Form>
-
-          {canEditRole && (
-            <div className="pt-3 border-top border-secondary">
-              <div className="fw-semibold small text-lb-cyan mb-1">
-                Programmatic SOC Ingestion API Token
-              </div>
-              <p className="text-secondary small mb-2">
-                Pass <code>Authorization: Token &lt;token&gt;</code> when posting automated SIEM /
-                SOAR / IDS events to <code>/api/soc/ingest/</code>.
-              </p>
-              <InputGroup size="sm">
-                <Form.Control
-                  type="text"
-                  readOnly
-                  className="mono-text bg-dark text-light border-secondary"
-                  value={apiTokenLoading ? 'Loading...' : apiTokenValue}
-                />
-                <Button
-                  variant="outline-warning"
-                  onClick={handleRotateApiToken}
-                  disabled={apiTokenLoading}
-                  title="Generate a new token and invalidate the current one"
-                >
-                  <RefreshCw size={13} className="me-1" />
-                  Rotate
-                </Button>
-              </InputGroup>
-            </div>
-          )}
-        </Modal.Body>
-        <Modal.Footer className="bg-dark border-secondary">
-          <Button
-            variant="outline-secondary"
-            size="sm"
-            onClick={() => setShowAccountModal(false)}
-          >
-            Close
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        authUser={authUser}
+        roleLabel={ROLE_LABELS[authUser.role] || authUser.role}
+        canEditRole={canEditRole}
+        onProfileUpdated={handleProfileUpdated}
+        onNotifySuccess={notifySuccess}
+        onApiError={handleApiError}
+      />
     </div>
   );
 }

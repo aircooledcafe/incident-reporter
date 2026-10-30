@@ -101,6 +101,11 @@ export const api = {
     request('/auth/logout/', {
       method: 'POST',
     }),
+  updateProfile: (formData) =>
+    request('/auth/profile/', {
+      method: 'PATCH',
+      body: formData,
+    }),
   changeOwnPassword: (data) =>
     request('/auth/change-password/', {
       method: 'POST',
@@ -166,9 +171,12 @@ export const api = {
     request(`/projects/${id}/unlock/`, {
       method: 'POST',
     }),
-  seedDemoProject: () =>
+  getDemoScenarios: () => request('/projects/demo_scenarios/'),
+  seedDemoProject: (scenario = 'expanse') =>
     request('/projects/seed_demo/', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario }),
     }),
 
   // Evidence Items
@@ -199,6 +207,30 @@ export const api = {
     }),
   deleteScreenshot: (id) =>
     request(`/screenshots/${id}/`, {
+      method: 'DELETE',
+    }),
+
+  // Related Escalated Incidents
+  addRelatedIncident: (data) =>
+    request('/related-incidents/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteRelatedIncident: (id) =>
+    request(`/related-incidents/${id}/`, {
+      method: 'DELETE',
+    }),
+
+  // Key Customer Contacts
+  addCustomerContact: (data) =>
+    request('/customer-contacts/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteCustomerContact: (id) =>
+    request(`/customer-contacts/${id}/`, {
       method: 'DELETE',
     }),
 

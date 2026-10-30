@@ -5,6 +5,8 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     UserProfile,
     Project,
+    RelatedIncident,
+    CustomerContact,
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
@@ -60,9 +62,9 @@ class CustomUserAdmin(BaseUserAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'role', 'updated_at')
+    list_display = ('user', 'role', 'preferred_display_name', 'pronouns', 'updated_at')
     list_filter = ('role',)
-    search_fields = ('user__username', 'user__email')
+    search_fields = ('user__username', 'user__email', 'preferred_display_name')
 
 
 @admin.register(Project)
@@ -72,6 +74,8 @@ class ProjectAdmin(admin.ModelAdmin):
     search_fields = ('title', 'customer_name', 'customer_id', 'ticket_id')
 
 
+admin.site.register(RelatedIncident)
+admin.site.register(CustomerContact)
 admin.site.register(ExternalResearch)
 admin.site.register(EvidenceItem)
 admin.site.register(EvidenceScreenshot)

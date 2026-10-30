@@ -60,6 +60,7 @@ def build_user_permissions_summary(user) -> dict:
         ),
         "can_manage_admins": role == UserProfile.ROLE_SUPER_ADMIN,
         "can_access_db_admin": role == UserProfile.ROLE_SUPER_ADMIN,
+        "can_seed_demo": role == UserProfile.ROLE_SUPER_ADMIN,
     }
 
 
@@ -102,7 +103,7 @@ def validate_user_management_action(
         if target_user is not None:
             if target_user.pk == actor.pk:
                 raise PermissionDenied(
-                    "Admins cannot modify their own role or delete their own account here; use Account Settings to change your password."
+                    "Admins cannot modify their own role or delete their own account here; use Profile & Account Settings."
                 )
             if not can_actor_modify_user(actor, target_user):
                 raise PermissionDenied(
@@ -139,9 +140,10 @@ def assert_project_unlocked(project) -> None:
 
 class ProjectAccessPermission(permissions.BasePermission):
     """
+    - demo_scenarios / seed_demo: SUPER_ADMIN only.
     - Safe methods (GET/HEAD/OPTIONS, including timeline & report exports): all authenticated users.
     - lock / unlock / destroy: ADMIN and SUPER_ADMIN only.
-    - create / update / partial_update / seed_demo: ANALYST, ADMIN, and SUPER_ADMIN.
+    - create / update / partial_update: ANALYST, ADMIN, and SUPER_ADMIN.
     """
 
     def has_permission(self, request, view):
@@ -149,10 +151,17 @@ class ProjectAccessPermission(permissions.BasePermission):
         if not user or not user.is_authenticated or not user.is_active:
             return False
 
+        action_name = getattr(view, 'action', None)
+        if action_name in ('seed_demo', 'demo_scenarios'):
+            if not is_super_admin(user):
+                raise PermissionDenied(
+                    "Only Super Admin users can load sample demonstration incidents."
+                )
+            return True
+
         if request.method in permissions.SAFE_METHODS:
             return bool(get_user_role(user))
 
-        action_name = getattr(view, 'action', None)
         if action_name in ('destroy', 'lock', 'unlock') or request.method == 'DELETE':
             if not is_admin_or_super(user):
                 raise PermissionDenied(

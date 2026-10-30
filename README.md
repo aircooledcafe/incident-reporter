@@ -13,27 +13,32 @@ A full-stack incident response evidence recording, chronological timeline constr
 
 ## Key Features
 
-1. **Django Built-In Authentication & Four-Tier Role-Based Access Control (RBAC)**
+1. **Top-Level Investigations Homepage (Default View)**
+   - Displays an at-a-glance overview of **current open investigations** by default, surfacing **Customer**, **Ticket Links**, **Related Escalated Incident Links**, **Incident Summary**, and **Analyst Action Plan**.
+   - Includes instant filter toggles for **Open**, **All**, **Archived**, and **Locked** investigations, plus ordering controls (**Chronological Newest/Oldest** and **Customer Name A→Z / Z→A**) and keyword search.
+
+2. **Django Built-In Authentication, User Profiles & Four-Tier RBAC**
    - Backed directly by Django's `django.contrib.auth` (`auth_user`, password validators, database-backed `django_session`, and DRF `authtoken_token`) paired with `UserProfile` roles: **Super Admin**, **Admin**, **Analyst**, and **Executive**.
-   - **Project Locking (Read-Only Mode)**: **Admin** and **Super Admin** users can lock any investigation project to freeze it as read-only (and unlock it when further changes are needed), while still allowing all roles to review evidence and export reports.
+   - **User Name Dropdown Menu & Personalization**: Clicking your user name in the top navigation bar opens a dropdown for **Account, Avatar & Preferences**, **User & Role Management** (Admin / Super Admin), **Django Database Admin** (Super Admin), and **Sign Out**. Users can upload/remove a **profile avatar**, set a **preferred display name**, and specify **pronouns**.
+   - **Project Locking (Read-Only Mode)**: **Admin** and **Super Admin** users can lock any investigation project to freeze it as read-only (and unlock it when needed). Both **Locked** and **Archived** investigations are hidden from the workspace sidebar by default until toggled on.
+   - **Super Admin Themed Demo Scenarios**: **Super Admin** accounts have exclusive access to **Load Sample Incident**, featuring four complete demonstration scenarios (*The Expanse* VPN/AD intrusion, *Star Trek* website compromise & web shells, *The Matrix* ClickFix to Domain Controller takeover, and *Star Wars* MitM phishing, spam wave & multi-account takeover).
 
-2. **Incident Project Overview & Archive Folder Provisioning**
-   - Supports **Title**, **Customer Name**, **Customer ID**, **Ticket ID**, **Ticket Link**, **Summary of Incident**, **Key Assets Affected**, **Key Users Affected**, **Key Malicious Indicators**, and **External Research** links & summaries (each individually removable).
+3. **Incident Project Overview & Archive Folder Provisioning**
+   - Supports **Title**, **Customer Name**, **Customer ID**, **Ticket ID**, **Ticket Link**, **Summary of Incident**, **Action Plan** (free-form next steps, investigation areas, and customer requests), **Related Escalated Incidents** (titles + links), **Key Customer Contacts** (name, role/title, email, phone, notes + bridge notes), **Key Assets Affected**, **Key Users Affected**, **Key Malicious Indicators**, and **External Research** links & summaries.
    - Automatically provisions a dedicated investigation folder (`artifacts/project_<id>_<slug>/`) containing `screenshots/`, `reports/`, and a live-synced `archive_manifest.json`.
-   - Investigation status management (`Open / Triage`, `Investigating`, `Contained`, `Archived / Closed`) with a header status picker, confirmation warning when closing/archiving, and a sidebar toggle to show/hide archived investigations.
+   - Investigation status management (`Open / Triage`, `Investigating`, `Contained`, `Archived / Closed`) with a header status picker, confirmation warning when closing/archiving, and sidebar switches for **Show Archived** and **Show Locked**.
 
-3. **Multi-Analyst Evidence Collection & Chronological Timeline**
-   - Multiple analysts can contribute evidence concurrently, with analyst attribution pre-populated from the signed-in user's profile.
-   - **Atomic Events (`ATOMIC`)**: Linked to a single IDS or log event (Timestamp, Summary, Affected Asset, Affected User, Malicious Hosts/IPs, Commands Run, MITRE Tactic & Technique, Related Log/IDS Link, Freeform Notes, Screenshots, and Key Evidence flag).
-   - **Search Result Evidence (`SEARCH`)**: Pattern of activity over a time window (Start Timestamp used for timeline ordering, End Timestamp, Summary, Affected Asset, Affected User with **Created by Attacker** flag, Malicious Hosts/IPs, Commands Run, MITRE Tactic & Technique, Search Result Link, Search Query Link, Freeform Notes, Screenshots, and Key Evidence flag).
-   - **Scoped Defanging**: Automatically defangs affected or malicious assets, hostnames, domains, files, IPs, and URLs (`192.168[.]1.1`, `domain[.]com`, `hxxps[:]//`, `payload[.]exe`) while keeping analyst-provided links to logs, searches, and external threat intelligence intact and clickable.
+4. **Multi-Analyst Evidence Collection, MITRE Multi-Select & Chronological Timeline**
+   - Multiple analysts can contribute evidence concurrently, with analyst attribution pre-populated from the signed-in user's preferred display name.
+   - **MITRE ATT&CK Multi-Select Dropdowns**: Evidence items feature multi-select menus for Enterprise **MITRE Tactics** and **MITRE Techniques**, dynamically filtering relevant techniques for the selected tactic(s) and pairing them in report summary tables.
+   - **Atomic Events (`ATOMIC`)** & **Search Result Evidence (`SEARCH`)** with timestamps, attacker-created user flags, commands run, screenshots, links, and **Key Evidence** flagging.
+   - **Scoped Defanging**: Automatically defangs affected or malicious assets, hostnames, domains, files, IPs, and URLs (`192.168[.]1.1`, `domain[.]com`, `hxxps[:]//`, `payload[.]exe`) while keeping analyst-provided links intact and clickable.
 
-4. **Two Incident Report Outputs**
-   - **Report 1 — Evidence Timeline Report (`.csv`)**: Time-ordered CSV export of **all** recorded evidence items, including MITRE ATT&CK Tactics and Techniques.
+5. **Two Incident Report Outputs**
+   - **Report 1 — Evidence Timeline Report (`.csv`)**: Time-ordered CSV export of **all** recorded evidence items, including multi-selected MITRE ATT&CK Tactics and Techniques.
    - **Report 2 — Key Evidence Formatted Report (`.odt` OpenDocument Text & `.md` Markdown)**:
-     - Includes **only items flagged as Key Evidence**, ordered chronologically.
-     - Structured with **Title**, **Summary of Incident**, **Key Evidence Timeline** (`TIMESTAMP, ASSET, USER:` followed by Analyst notes, Key malicious indicators, embedded Screenshots, and Links), and three **Summary Tables at the bottom** (*Key Assets Affected*, *Key Malicious Indicators*, and *MITRE Tactics and Techniques*).
-     - The Markdown export automatically creates a dedicated `key_evidence_screenshots_project_<id>/` folder alongside the `.md` report and links to the images there (also downloadable as a `.zip` bundle).
+     - Includes **only items flagged as Key Evidence**, ordered chronologically, with embedded screenshots and three **Summary Tables at the bottom** (*Key Assets Affected*, *Key Malicious Indicators*, and *MITRE Tactics and Techniques*).
+     - The Markdown export automatically creates a dedicated `key_evidence_screenshots_project_<id>/` folder alongside the `.md` report (also downloadable as a `.zip` bundle).
 
 ---
 
@@ -46,16 +51,17 @@ Authentication uses Django's built-in `django.contrib.auth` session and password
 | Capability | Executive (`EXECUTIVE`) | Analyst (`ANALYST`) | Admin (`ADMIN`) | Super Admin (`SUPER_ADMIN`) |
 | :--- | :---: | :---: | :---: | :---: |
 | Sign in, sign out, & change own password | Yes | Yes | Yes | Yes |
-| Review projects, timelines, research, & screenshots | Yes | Yes | Yes | Yes |
+| Upload avatar, set preferred display name, & set pronouns | Yes | Yes | Yes | Yes |
+| View Homepage, projects, timelines, contacts, & screenshots | Yes | Yes | Yes | Yes |
 | Export CSV, ODT, Markdown, & ZIP reports | Yes | Yes | Yes | Yes |
-| Create projects & load sample incident | No | Yes | Yes | Yes |
-| Modify unlocked projects, evidence, research, & screenshots | No | Yes | Yes | Yes |
+| Create projects & modify unlocked investigations / action plans | No | Yes | Yes | Yes |
 | Generate API token & push via `/api/soc/ingest/` *(unlocked projects)* | No | Yes | Yes | Yes |
 | **Lock / Unlock** projects (read-only toggle) | No | No | **Yes** | **Yes** |
 | **Delete** projects *(must be unlocked first)* | No | No | **Yes** | **Yes** |
 | Create **Analyst** & **Executive** users | No | No | **Yes** | **Yes** |
 | Assign roles (`ANALYST` / `EXECUTIVE`), enable/disable, & reset passwords for lesser users | No | No | **Yes** | **Yes** |
 | Create & manage **Admin** / **Super Admin** users | No | No | **No** | **Yes** |
+| **Load Sample Incidents** (*Expanse*, *Star Trek*, *Matrix*, *Star Wars*) | No | No | **No** | **Yes** |
 | Access Django `/admin/` raw database administration | No | No | **No** | **Yes** |
 
 ### Bootstrapping the Initial Super Admin Account
@@ -82,9 +88,11 @@ All relational data—including Django's built-in user accounts, role profiles, 
 
 ```mermaid
 erDiagram
-    auth_user ||--|| UserProfile : "has role profile (profile)"
+    auth_user ||--|| UserProfile : "has role & profile (profile)"
     auth_user ||--o| authtoken_token : "has API token"
     auth_user ||--o{ Project : "locks (locked_projects)"
+    Project ||--o{ RelatedIncident : "has many (related_incidents)"
+    Project ||--o{ CustomerContact : "has many (customer_contacts)"
     Project ||--o{ ExternalResearch : "has many (external_research_items)"
     Project ||--o{ EvidenceItem : "has many (evidence_items)"
     EvidenceItem ||--o{ EvidenceScreenshot : "has many (screenshots)"
@@ -107,6 +115,9 @@ erDiagram
         int id PK
         int user_id FK "OneToOne -> auth_user"
         string role "SUPER_ADMIN | ADMIN | ANALYST | EXECUTIVE"
+        string preferred_display_name
+        string pronouns
+        file avatar "Stored under artifacts/avatars/"
         datetime created_at
         datetime updated_at
     }
@@ -131,6 +142,8 @@ erDiagram
         string ticket_id
         string ticket_link
         text summary
+        text action_plan "Free-form next steps & customer requests"
+        text key_customer_contacts "Bridge / general escalation notes"
         text key_assets_affected
         text key_users_affected
         text key_malicious_indicators
@@ -142,6 +155,26 @@ erDiagram
         string artifact_folder "e.g. project_1_tycho-intrusion"
         datetime created_at
         datetime updated_at
+    }
+
+    RelatedIncident {
+        int id PK
+        int project_id FK
+        string title
+        string link
+        string analyst_name
+        datetime created_at
+    }
+
+    CustomerContact {
+        int id PK
+        int project_id FK
+        string name
+        string role_title
+        string email
+        string phone
+        text notes
+        datetime created_at
     }
 
     ExternalResearch {
@@ -166,8 +199,8 @@ erDiagram
         boolean user_created_by_attacker
         text malicious_hosts_ips
         text commands_run
-        string mitre_tactic
-        string mitre_technique
+        text mitre_tactic "Multi-select (; delimited)"
+        text mitre_technique "Multi-select (; delimited)"
         string related_log_link
         string search_result_link
         string search_query_link
@@ -241,8 +274,8 @@ All application and user-created state lives outside the containers via configur
 
 | External Host / NAS Path (`.env`) | Container Mount | Persisted Data |
 | :--- | :--- | :--- |
-| `HOST_DB_DIR` *(default `./data/db`)* | `/data/db` | `db.sqlite3` (and SQLite journal/WAL files): **`auth_user` table**, **`UserProfile` roles**, **`django_session` login sessions**, **`authtoken_token` API keys**, **`django_admin_log`**, **`Project`**, **`ExternalResearch`**, **`EvidenceItem`**, and **`EvidenceScreenshot`** metadata. |
-| `HOST_ARTIFACTS_DIR` *(default `./artifacts`)* | `/data/artifacts` | Per-investigation folders (`project_<id>_<slug>/`), uploaded **`screenshots/`**, generated **`reports/`** (`.csv`, `.odt`, `.md`, `.zip`), and **`archive_manifest.json`**. |
+| `HOST_DB_DIR` *(default `./data/db`)* | `/data/db` | `db.sqlite3` (and SQLite journal/WAL files): **`auth_user` table**, **`UserProfile` roles/display names/pronouns**, **`django_session` login sessions**, **`authtoken_token` API keys**, **`django_admin_log`**, **`Project`**, **`RelatedIncident`**, **`CustomerContact`**, **`ExternalResearch`**, **`EvidenceItem`**, and **`EvidenceScreenshot`** metadata. |
+| `HOST_ARTIFACTS_DIR` *(default `./artifacts`)* | `/data/artifacts` | User profile **`avatars/`**, per-investigation folders (`project_<id>_<slug>/`), uploaded **`screenshots/`**, generated **`reports/`** (`.csv`, `.odt`, `.md`, `.zip`), and **`archive_manifest.json`**. |
 
 To store data on an external disk, NAS/NFS share, or SAN mount (e.g., `/mnt/soc-storage`), set in `.env`:
 ```ini
@@ -307,7 +340,7 @@ cd ..
 - **Backend API**: `http://localhost:8000`
 
 ### 4. Automated Test Suite
-Runs 12 comprehensive test cases covering defanging, authentication, initial setup bootstrap, Executive/Analyst/Admin/Super Admin RBAC boundaries, `/admin/` database restriction, project locking/unlocking, project deletion cleanup, protected `/artifacts/` media serving, CSV/ODT/Markdown report generation, and SOC API token ingestion:
+Runs 14 comprehensive test cases covering defanging, authentication, initial setup bootstrap, user profile avatars/preferred display names/pronouns, Executive/Analyst/Admin/Super Admin RBAC boundaries, Super Admin-only 4-scenario sample incident seeding, `/admin/` database restriction, project locking/unlocking, action plans, related escalated incidents, customer contacts, multi-select MITRE ATT&CK summary pairing, project deletion cleanup, protected `/artifacts/` media serving, CSV/ODT/Markdown report generation, and SOC API token ingestion:
 ```bash
 cd backend
 .venv/bin/python manage.py test incidents
@@ -317,7 +350,7 @@ cd backend
 
 ## Programmatic SOC Tool Ingestion API
 
-External Python/Django SIEM, SOAR, or IDS scripts can push evidence into an **unlocked** project via `POST /api/soc/ingest/` using an **Analyst**, **Admin**, or **Super Admin** API Token (viewable/rotatable in the web UI under **Account -> Programmatic SOC Ingestion API Token**):
+External Python/Django SIEM, SOAR, or IDS scripts can push evidence into an **unlocked** project via `POST /api/soc/ingest/` using an **Analyst**, **Admin**, or **Super Admin** API Token (viewable/rotatable in the web UI by clicking your user name -> **Account, Avatar & Preferences -> Password & API Token**):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/soc/ingest/ \
