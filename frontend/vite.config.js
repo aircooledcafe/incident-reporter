@@ -3,7 +3,16 @@ import react from '@vitejs/plugin-react';
 
 const backendProxy = {
   target: 'http://127.0.0.1:8000',
-  xfwd: true,
+  configure: (proxy) => {
+    proxy.on('proxyReq', (proxyReq, req) => {
+      if (!req.headers['x-forwarded-host'] && req.headers.host) {
+        proxyReq.setHeader('X-Forwarded-Host', req.headers.host);
+      }
+      if (!req.headers['x-forwarded-proto']) {
+        proxyReq.setHeader('X-Forwarded-Proto', req.socket?.encrypted ? 'https' : 'http');
+      }
+    });
+  },
 };
 
 export default defineConfig({

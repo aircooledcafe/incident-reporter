@@ -52,11 +52,20 @@ ALLOWED_HOSTS = [
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
+def _normalize_csrf_origin(raw_origin: str) -> str:
+    cleaned = raw_origin.strip().rstrip('/')
+    if not cleaned:
+        return ''
+    if not cleaned.startswith(('http://', 'https://')):
+        cleaned = f'https://{cleaned}'
+    return cleaned
+
+
 _csrf_origins_raw = os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').strip()
 CSRF_TRUSTED_ORIGINS = [
-    origin.strip()
+    normalized
     for origin in _csrf_origins_raw.split(',')
-    if origin.strip()
+    if (normalized := _normalize_csrf_origin(origin))
 ]
 
 
