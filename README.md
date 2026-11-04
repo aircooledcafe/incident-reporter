@@ -436,33 +436,19 @@ cd ..
 - **Backend API**: `http://localhost:8000`
 
 ### 4. Automated Test Suite
-Runs 14 comprehensive test cases covering defanging, authentication, initial setup bootstrap, user profile avatars/preferred display names/pronouns, Executive/Analyst/Admin/Super Admin RBAC boundaries, Super Admin-only 4-scenario sample incident seeding, `/admin/` database restriction, project locking/unlocking, action plans, related escalated incidents, customer contacts, multi-select MITRE ATT&CK summary pairing, project deletion cleanup, protected `/artifacts/` media serving, CSV/ODT/Markdown report generation, and SOC API token ingestion:
+Runs 19 comprehensive test cases covering defanging, authentication, initial setup bootstrap, user profile avatars/preferred display names/pronouns, Executive/Analyst/Admin/Super Admin RBAC boundaries, Super Admin sample incident seeding, `/admin/` database restriction, project locking/unlocking, action plans, related escalated incidents, customer contacts, bulk evidence creation, timeline auto-sync, project deletion cleanup, protected `/artifacts/` media serving, CSV/ODT/Markdown report generation, and SOC API token ingestion:
 ```bash
 cd backend
-.venv/bin/python manage.py test incidents
+.venv/bin/python manage.py test investigations
 ```
 
 ---
 
-## Programmatic SOC Tool Ingestion API
+## REST API & Programmatic Ingestion
 
-External Python/Django SIEM, SOAR, or IDS scripts can push evidence into an **unlocked** project via `POST /api/soc/ingest/` using an **Analyst**, **Admin**, or **Super Admin** API Token (viewable/rotatable in the web UI by clicking your user name -> **Account, Avatar & Preferences -> Password & API Token**):
+Incident Reporter includes a full-featured REST API for programmatic investigation lifecycle management, atomic bulk evidence ingestion, SIEM/SOAR alert webhooks, customer directory automation, and report exports. API requests are authenticated via persistent API tokens (`Authorization: Token <YOUR_TOKEN>`) with strict role-based access control (RBAC).
 
-```bash
-curl -X POST http://127.0.0.1:8000/api/soc/ingest/ \
-  -H "Authorization: Token <YOUR_API_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticket_id": "SOC-2026-9041",
-    "evidence_type": "ATOMIC",
-    "analyst_name": "James Holden",
-    "timestamp": "2026-10-17T03:15:00Z",
-    "summary": "Outbound C2 beacon blocked at perimeter firewall",
-    "affected_asset": "DC-PROD-01 (10.20.0.10)",
-    "malicious_hosts_ips": "45.155.205.109, c2.ceres-telemetry.net",
-    "mitre_tactic": "Command and Control (TA0011)",
-    "mitre_technique": "T1071.001 - Web Protocols",
-    "related_log_link": "https://siem.internal.example/events/fw-99201",
-    "is_key_evidence": true
-  }'
-```
+> [!NOTE]
+> For the complete API documentation, endpoint reference, JSON schemas, atomic bulk ingestion formats, and ready-to-run Python/cURL automation scripts, see the dedicated specification:
+>
+> 📄 **[Comprehensive REST API Specification (`API_SPECIFICATION.md`)](file:///Users/ben/incident-reporter/API_SPECIFICATION.md)**

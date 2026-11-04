@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import viewsets, status
@@ -30,6 +31,7 @@ from .permissions import (
     assert_can_delete_evidence_item,
     assert_can_delete_screenshot,
     assert_can_delete_pcap,
+    can_write_investigations,
 )
 from .serializers import (
     CustomerSerializer,
@@ -61,6 +63,19 @@ class CustomerViewSet(viewsets.ModelViewSet):
     serializer_class = CustomerSerializer
     permission_classes = [CustomerAccessPermission]
 
+    def get_object(self):
+        from django.http import Http404
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = str(self.kwargs.get(lookup_url_kwarg, '')).strip()
+        queryset = self.filter_queryset(self.get_queryset())
+        obj = queryset.filter(customer_id__iexact=lookup_value).first()
+        if not obj and lookup_value.isdigit():
+            obj = queryset.filter(pk=int(lookup_value)).first()
+        if not obj:
+            raise Http404(f"No Customer found matching '{lookup_value}'.")
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def perform_destroy(self, instance):
         if instance.investigations.exists():
             raise PermissionDenied(
@@ -86,10 +101,15 @@ class CustomerContactViewSet(viewsets.ModelViewSet):
     permission_classes = [CustomerAccessPermission]
 
     def get_queryset(self):
+        from django.db.models import Q
         qs = super().get_queryset()
         customer_id = self.request.query_params.get('customer') or self.request.query_params.get('customer_id')
         if customer_id:
-            qs = qs.filter(customer_id=customer_id)
+            c_str = str(customer_id).strip()
+            if c_str.isdigit():
+                qs = qs.filter(Q(customer_id=int(c_str)) | Q(customer__customer_id__iexact=c_str))
+            else:
+                qs = qs.filter(customer__customer_id__iexact=c_str)
         return qs
 
     def perform_create(self, serializer):
@@ -118,6 +138,37 @@ class InvestigationViewSet(viewsets.ModelViewSet):
     )
     serializer_class = InvestigationSerializer
     permission_classes = [InvestigationAccessPermission]
+
+    def get_object(self):
+        from django.http import Http404
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = str(self.kwargs.get(lookup_url_kwarg, '')).strip()
+        queryset = self.filter_queryset(self.get_queryset())
+        obj = queryset.filter(investigation_id__iexact=lookup_value).first()
+        if not obj and lookup_value.isdigit():
+            obj = queryset.filter(pk=int(lookup_value)).first()
+        if not obj:
+            raise Http404(f"No Investigation found matching '{lookup_value}'.")
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    def get_queryset(self):
+        from django.db.models import Q
+        qs = super().get_queryset()
+        cust_param = self.request.query_params.get('customer') or self.request.query_params.get('customer_id')
+        if cust_param:
+            cust_str = str(cust_param).strip()
+            if cust_str.isdigit():
+                qs = qs.filter(Q(customer_id=int(cust_str)) | Q(customer__customer_id__iexact=cust_str))
+            else:
+                qs = qs.filter(customer__customer_id__iexact=cust_str)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param.upper())
+        inv_code = self.request.query_params.get('investigation_id') or self.request.query_params.get('code')
+        if inv_code:
+            qs = qs.filter(investigation_id__iexact=str(inv_code).strip())
+        return qs
 
     def perform_create(self, serializer):
         lead = (serializer.validated_data.get('lead_analyst') or '').strip()
@@ -240,6 +291,17 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(created[0])
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['post'], url_path='bulk-evidence')
+    def bulk_evidence(self, request, pk=None):
+        """Allows bulk ingestion of evidence items directly tied to this investigation."""
+        investigation = self.get_object()
+        return EvidenceItemViewSet().handle_bulk_create_payload(request, target_investigation=investigation)
+
+    @action(detail=True, methods=['post'], url_path='bulk_evidence')
+    def bulk_evidence_underscore(self, request, pk=None):
+        investigation = self.get_object()
+        return EvidenceItemViewSet().handle_bulk_create_payload(request, target_investigation=investigation)
+
 
 ProjectViewSet = InvestigationViewSet
 
@@ -279,6 +341,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
             )
 
     def get_queryset(self):
+        from django.db.models import Q
         qs = super().get_queryset()
         investigation_id = (
             self.request.query_params.get('investigation')
@@ -286,7 +349,14 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
             or self.request.query_params.get('project')
         )
         if investigation_id:
-            qs = qs.filter(investigation_id=investigation_id)
+            inv_str = str(investigation_id).strip()
+            if inv_str.isdigit():
+                qs = qs.filter(
+                    Q(investigation_id=int(inv_str)) |
+                    Q(investigation__investigation_id__iexact=inv_str)
+                )
+            else:
+                qs = qs.filter(investigation__investigation_id__iexact=inv_str)
 
         key_only = self.request.query_params.get('is_key_evidence')
         if key_only is not None:
@@ -326,6 +396,141 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         item.save(update_fields=['is_key_evidence', 'updated_at'])
         item.investigation.sync_timeline_events()
         return Response(self.get_serializer(item).data)
+
+    @action(detail=False, methods=['post'], url_path='bulk_create')
+    def bulk_create(self, request):
+        return self.handle_bulk_create_payload(request)
+
+    @action(detail=False, methods=['post'], url_path='bulk')
+    def bulk(self, request):
+        return self.handle_bulk_create_payload(request)
+
+    @action(detail=False, methods=['post'], url_path='bulk-create')
+    def bulk_dash(self, request):
+        return self.handle_bulk_create_payload(request)
+
+    def handle_bulk_create_payload(self, request, target_investigation=None):
+        if not can_write_investigations(request.user):
+            raise PermissionDenied(
+                "Executive accounts are read-only and cannot create investigation items."
+            )
+
+        data = request.data
+        if isinstance(data, list):
+            raw_items = data
+            default_investigation_id = target_investigation.id if target_investigation else None
+        elif isinstance(data, dict):
+            raw_items = data.get('items') if 'items' in data else data.get('evidence_items')
+            if raw_items is None:
+                return Response(
+                    {'error': "Expected a JSON payload with an 'items' array or a JSON array of items."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            default_investigation_id = (
+                target_investigation.id
+                if target_investigation
+                else (data.get('investigation') or data.get('project'))
+            )
+        else:
+            return Response(
+                {'error': "Expected a JSON object with 'items' array or a JSON array of items."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(raw_items, list) or len(raw_items) == 0:
+            return Response(
+                {'error': "'items' must be a non-empty array of evidence items."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        validated_serializers = []
+        investigations_cache = {}
+        if target_investigation:
+            investigations_cache[target_investigation.id] = target_investigation
+
+        errors = []
+        for idx, item in enumerate(raw_items):
+            if not isinstance(item, dict):
+                errors.append({'index': idx, 'error': 'Item must be a JSON object.'})
+                continue
+
+            item_data = item.copy()
+            inv_id = item_data.get('investigation') or item_data.get('project') or default_investigation_id
+            if not inv_id:
+                errors.append({
+                    'index': idx,
+                    'error': "Missing 'investigation'. Specify at top level or per item.",
+                })
+                continue
+            item_data['investigation'] = inv_id
+
+            if inv_id not in investigations_cache:
+                inv_str = str(inv_id).strip()
+                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
+                if not inv_obj and inv_str.isdigit():
+                    inv_obj = Investigation.objects.filter(pk=int(inv_str)).first()
+                if not inv_obj:
+                    errors.append({
+                        'index': idx,
+                        'error': f"Investigation '{inv_id}' does not exist.",
+                    })
+                    continue
+                investigations_cache[inv_id] = inv_obj
+                investigations_cache[inv_obj.id] = inv_obj
+                investigations_cache[inv_obj.investigation_id] = inv_obj
+
+            inv_obj = investigations_cache[inv_id]
+            item_data['investigation'] = inv_obj.pk
+            try:
+                assert_project_unlocked(inv_obj)
+            except Exception as lock_err:
+                errors.append({'index': idx, 'error': str(lock_err)})
+                continue
+
+            serializer = EvidenceItemSerializer(data=item_data, context={'request': request})
+            if not serializer.is_valid():
+                errors.append({'index': idx, 'errors': serializer.errors})
+            else:
+                validated_serializers.append((serializer, inv_obj))
+
+        if errors:
+            return Response(
+                {
+                    'error': 'Validation failed for one or more evidence items. No items were saved.',
+                    'details': errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        default_analyst = get_user_display_name(request.user)
+        created_instances = []
+        investigations_to_sync = set()
+
+        with transaction.atomic():
+            for serializer, inv_obj in validated_serializers:
+                analyst = (serializer.validated_data.get('analyst_name') or '').strip()
+                if not analyst:
+                    analyst = default_analyst
+                instance = serializer.save(analyst_name=analyst, created_by=request.user)
+                created_instances.append(instance)
+                investigations_to_sync.add(inv_obj)
+
+            for inv in investigations_to_sync:
+                inv.sync_timeline_events()
+
+        resp_serializer = EvidenceItemSerializer(
+            created_instances,
+            many=True,
+            context={'request': request},
+        )
+        return Response(
+            {
+                'status': 'success',
+                'count': len(created_instances),
+                'items': resp_serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class RelatedIncidentViewSet(viewsets.ModelViewSet):
@@ -513,9 +718,12 @@ class SOCIngestAPIView(APIView):
 
         inv = None
         if inv_id:
-            inv = Investigation.objects.filter(pk=inv_id).first()
+            inv_str = str(inv_id).strip()
+            inv = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
+            if not inv and inv_str.isdigit():
+                inv = Investigation.objects.filter(pk=int(inv_str)).first()
         elif ticket_id:
-            inv = Investigation.objects.filter(ticket_id=ticket_id).first()
+            inv = Investigation.objects.filter(ticket_id__iexact=str(ticket_id).strip()).order_by('-updated_at').first()
 
         if not inv:
             return Response(

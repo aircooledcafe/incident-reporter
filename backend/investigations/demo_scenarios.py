@@ -182,6 +182,7 @@ def _materialize_scenario(spec: dict) -> Investigation:
 def _get_expanse_spec() -> dict:
     return {
         "project": {
+            "investigation_id": "INV000001",
             "title": "Unauthorized VPN Intrusion, Active Directory Compromise & Data Exfiltration",
             "customer_name": "Tycho Manufacturing & Logistics",
             "customer_id": "CUST-90421",
@@ -721,6 +722,7 @@ def _get_expanse_spec() -> dict:
 def _get_star_trek_spec() -> dict:
     return {
         "project": {
+            "investigation_id": "INV000002",
             "title": "Subspace Research Portal Compromise, Web Shell Deployment & Database Credential Theft",
             "customer_name": "Daystrom Institute & Utopia Planitia Yards",
             "customer_id": "CUST-47170",
@@ -976,6 +978,7 @@ def _get_star_trek_spec() -> dict:
 def _get_matrix_spec() -> dict:
     return {
         "project": {
+            "investigation_id": "INV000003",
             "title": "ClickFix Fake Verification Compromise Escalating to Domain Controller Takeover",
             "customer_name": "MetaCortex Software Corporation",
             "customer_id": "CUST-19990",
@@ -1211,6 +1214,7 @@ def _get_matrix_spec() -> dict:
 def _get_star_wars_spec() -> dict:
     return {
         "project": {
+            "investigation_id": "INV000004",
             "title": "Adversary-in-the-Middle (MitM) Phishing Leading to Mass Spam Wave & Multi-Account Takeover",
             "customer_name": "Corellian Engineering Corporation",
             "customer_id": "CUST-32700",
@@ -1431,6 +1435,7 @@ def _get_star_wars_spec() -> dict:
 def _get_god_of_war_spec() -> dict:
     return {
         "project": {
+            "investigation_id": "INV000005",
             "title": "Fimbulwinter Ransomware Deployment, Volume Shadow Deletion & Domain-Wide Encryption",
             "customer_name": "Midgard Realmworks Technologies",
             "customer_id": "CUST-GOW-05",

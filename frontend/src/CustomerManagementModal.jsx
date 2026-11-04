@@ -37,6 +37,7 @@ export default function CustomerManagementModal({
   onNotifySuccess,
   onNotifyError,
   onCustomerUpdated,
+  onCustomerCreated,
 }) {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -123,8 +124,9 @@ export default function CustomerManagementModal({
         await api.updateCustomer(editingCustomer.id, customerForm);
         onNotifySuccess?.(`Customer "${customerForm.name}" updated.`);
       } else {
-        await api.createCustomer(customerForm);
+        const created = await api.createCustomer(customerForm);
         onNotifySuccess?.(`Customer "${customerForm.name}" created.`);
+        onCustomerCreated?.(created);
       }
       setShowCustomerForm(false);
       await loadCustomers();

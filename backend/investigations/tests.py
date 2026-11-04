@@ -14,12 +14,16 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import RequestFactory, TestCase, override_settings
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 from PIL import Image as PilImage
 
 from .defang import defang_text
 from .models import (
+    Customer,
+    CustomerContact,
+    Investigation,
     EvidenceItem,
     Project,
     UserProfile,
@@ -1172,3 +1176,261 @@ class IncidentReporterTests(TestCase):
 
         del_cust_ok = self.client.delete(f"/api/customers/{cust_id}/")
         self.assertEqual(del_cust_ok.status_code, 204)
+
+    def test_bulk_evidence_creation_and_timeline_sync(self):
+        """
+        Tests the bulk evidence creation endpoint (/api/evidence/bulk_create/ and
+        /api/investigations/{id}/bulk-evidence/):
+        1. Atomic multi-item ingestion with automatic timeline sync.
+        2. Validation failure rollbacks.
+        3. Project lock enforcement.
+        4. Role permission checks (Executive forbidden).
+        """
+        # Create customer & investigation
+        cust = Customer.objects.create(name="Allomancy Logistics", customer_id="CUST-ALLO-01")
+        inv = Investigation.objects.create(
+            title="House Venture Warehouse Breach",
+            customer=cust,
+            lead_analyst="Vin",
+        )
+
+        # 1. Analyst bulk-posts 3 items to /api/evidence/bulk_create/
+        self.client.force_authenticate(user=self.analyst_user)
+        payload = {
+            "investigation": inv.id,
+            "items": [
+                {
+                    "evidence_type": "ATOMIC",
+                    "timestamp": "2026-10-31T08:00:00Z",
+                    "summary": "Initial atium cache door compromise",
+                    "affected_asset": "VAULT-GATE-01",
+                    "mitre_tactic": "Initial Access (TA0001)",
+                    "mitre_technique": "T1190 - Exploit Public-Facing Application",
+                },
+                {
+                    "evidence_type": "ATOMIC",
+                    "timestamp": "2026-10-31T08:30:00Z",
+                    "summary": "Steelpush acoustic sensor tampering",
+                    "affected_asset": "SENSOR-SRV-02",
+                    "mitre_tactic": "Defense Evasion (TA0005)",
+                    "mitre_technique": "T1562.001 - Disable or Modify Tools",
+                },
+                {
+                    "evidence_type": "SEARCH",
+                    "timestamp": "2026-10-31T09:00:00Z",
+                    "end_timestamp": "2026-10-31T09:45:00Z",
+                    "summary": "Continuous metal reserve exfiltration",
+                    "affected_asset": "CARGO-DOCK-04",
+                    "mitre_tactic": "Exfiltration (TA0010)",
+                    "mitre_technique": "T1048 - Exfiltration Over Alternative Protocol",
+                    "is_key_evidence": True,
+                },
+            ],
+        }
+
+        res = self.client.post("/api/evidence/bulk_create/", payload, format="json")
+        self.assertEqual(res.status_code, 201)
+        res_data = res.json()
+        self.assertEqual(res_data["status"], "success")
+        self.assertEqual(res_data["count"], 3)
+        self.assertEqual(len(res_data["items"]), 3)
+
+        # Verify investigation timeline was synchronized
+        inv.refresh_from_db()
+        self.assertEqual(len(inv.timeline_events), 3)
+        self.assertEqual(inv.timeline_events[0]["summary"], "Initial atium cache door compromise")
+        self.assertEqual(inv.timeline_events[2]["summary"], "Continuous metal reserve exfiltration")
+        self.assertTrue(inv.timeline_events[2]["is_key_evidence"])
+
+        # 2. Ingest via investigation action /api/investigations/{id}/bulk-evidence/
+        sub_payload = [
+            {
+                "evidence_type": "ATOMIC",
+                "timestamp": "2026-10-31T10:00:00Z",
+                "summary": "Coppercloud trace wiped from perimeter logs",
+                "affected_asset": "LOG-SRV-01",
+            }
+        ]
+        res_sub = self.client.post(f"/api/investigations/{inv.id}/bulk-evidence/", sub_payload, format="json")
+        self.assertEqual(res_sub.status_code, 201)
+        self.assertEqual(res_sub.json()["count"], 1)
+
+        inv.refresh_from_db()
+        self.assertEqual(len(inv.timeline_events), 4)
+
+        # 3. Validation failure: an invalid item must roll back everything atomically
+        initial_ev_count = EvidenceItem.objects.filter(investigation=inv).count()
+        bad_payload = {
+            "investigation": inv.id,
+            "items": [
+                {
+                    "evidence_type": "ATOMIC",
+                    "summary": "Valid item before error",
+                    "timestamp": "2026-10-31T11:00:00Z",
+                },
+                {
+                    "evidence_type": "INVALID_TYPE_ENUM",
+                    "summary": "Corrupted item",
+                    "timestamp": "not-a-valid-date",
+                },
+            ],
+        }
+        bad_res = self.client.post("/api/evidence/bulk_create/", bad_payload, format="json")
+        self.assertEqual(bad_res.status_code, 400)
+        self.assertIn("error", bad_res.json())
+        # Confirm no items were saved (atomic rollback)
+        self.assertEqual(EvidenceItem.objects.filter(investigation=inv).count(), initial_ev_count)
+
+        # 4. Project locked enforcement: lock the investigation and attempt bulk creation
+        inv.is_locked = True
+        inv.locked_by = self.admin_user
+        inv.locked_at = timezone.now()
+        inv.save()
+
+        locked_res = self.client.post(
+            "/api/evidence/bulk_create/",
+            {"investigation": inv.id, "items": [{"summary": "Blocked on locked"}]},
+            format="json",
+        )
+        self.assertEqual(locked_res.status_code, 400)
+        self.assertIn("locked", str(locked_res.json()).lower())
+
+        inv.is_locked = False
+        inv.save()
+
+        # 5. Executive role CANNOT create bulk evidence (read-only RBAC)
+        self.client.force_authenticate(user=self.exec_user)
+        exec_res = self.client.post(
+            "/api/evidence/bulk_create/",
+            {"investigation": inv.id, "items": [{"summary": "Exec attempt"}]},
+            format="json",
+        )
+        self.assertEqual(exec_res.status_code, 403)
+
+    def test_human_readable_customer_and_investigation_identifiers_api(self):
+        """
+        Tests human-readable identifiers across the entire API:
+        1. Customer lookup via customer_id (e.g. /api/customers/CANTON-FIN-01/).
+        2. Investigation creation referencing customer by customer_id string without numeric DB IDs.
+        3. Automatic assignment of INV###### format investigation_id (e.g. INV000001).
+        4. Detail, lock, unlock, and bulk-evidence access via /api/investigations/INV######/.
+        5. Evidence item single and bulk ingestion referencing investigation by INV######.
+        6. SOC ingest webhook matching by INV######.
+        """
+        import re
+
+        # 1. Create a customer with a custom business customer_id code
+        self.client.force_authenticate(user=self.admin_user)
+        cust_res = self.client.post(
+            "/api/customers/",
+            {
+                "name": "Canton of Resource & Finance",
+                "customer_id": "CANTON-FIN-01",
+                "notes": "Luthadel Treasury",
+            },
+            format="json",
+        )
+        self.assertEqual(cust_res.status_code, 201)
+
+        # Lookup customer by customer_id string
+        get_cust = self.client.get("/api/customers/CANTON-FIN-01/")
+        self.assertEqual(get_cust.status_code, 200)
+        self.assertEqual(get_cust.json()["customer_id"], "CANTON-FIN-01")
+
+        # 2. Analyst creates investigation referencing customer by customer_id string (no DB PK needed!)
+        self.client.force_authenticate(user=self.analyst_user)
+        inv_payload = {
+            "customer": "CANTON-FIN-01",
+            "title": "Operation Tenth Metal Breach",
+            "ticket_id": "CANTON-SEC-1024",
+            "summary": "Perimeter breach testing allomantic ledgers",
+        }
+        create_inv_res = self.client.post("/api/investigations/", inv_payload, format="json")
+        self.assertEqual(create_inv_res.status_code, 201)
+        inv_data = create_inv_res.json()
+
+        # 3. Verify format: INV followed by 6 digits (INV123456 format)
+        inv_code = inv_data.get("investigation_id")
+        self.assertIsNotNone(inv_code)
+        self.assertTrue(bool(re.match(r"^INV\d{6}$", inv_code)), f"Expected INV######, got: {inv_code}")
+        self.assertEqual(inv_data["customer_id"], "CANTON-FIN-01")
+
+        # 4. Access investigation detail directly using the human-readable INV###### URL
+        detail_res = self.client.get(f"/api/investigations/{inv_code}/")
+        self.assertEqual(detail_res.status_code, 200)
+        self.assertEqual(detail_res.json()["title"], "Operation Tenth Metal Breach")
+
+        # Lock and unlock using the INV###### identifier
+        self.client.force_authenticate(user=self.admin_user)
+        lock_res = self.client.post(f"/api/investigations/{inv_code}/lock/")
+        self.assertEqual(lock_res.status_code, 200)
+        self.assertTrue(lock_res.json()["is_locked"])
+
+        unlock_res = self.client.post(f"/api/investigations/{inv_code}/unlock/")
+        self.assertEqual(unlock_res.status_code, 200)
+        self.assertFalse(unlock_res.json()["is_locked"])
+
+        # 5. Analyst creates single evidence item passing "investigation": "INV######" (no integer PK!)
+        self.client.force_authenticate(user=self.analyst_user)
+        ev_payload = {
+            "investigation": inv_code,
+            "evidence_type": "ATOMIC",
+            "summary": "Spear-phishing attachment delivered",
+            "affected_asset": "MAIL-LUTHADEL-01",
+        }
+        ev_res = self.client.post("/api/evidence/", ev_payload, format="json")
+        self.assertEqual(ev_res.status_code, 201)
+        self.assertEqual(ev_res.json()["investigation_id"], inv_code)
+
+        # 6. Bulk evidence ingestion referencing investigation by string code
+        bulk_payload = {
+            "investigation": inv_code,
+            "items": [
+                {
+                    "evidence_type": "ATOMIC",
+                    "summary": "Mimikatz LSASS dump",
+                    "affected_asset": "WRK-INQUISITOR-03",
+                },
+                {
+                    "evidence_type": "SEARCH",
+                    "summary": "18.4GB exfiltration of Atium manifests",
+                    "affected_asset": "DB-CANTON-RESOURCE",
+                    "is_key_evidence": True,
+                },
+            ],
+        }
+        bulk_res = self.client.post("/api/evidence/bulk_create/", bulk_payload, format="json")
+        self.assertEqual(bulk_res.status_code, 201)
+        self.assertEqual(bulk_res.json()["count"], 2)
+
+        # Bulk evidence directly on the investigation URL using INV######
+        bulk_sub = self.client.post(
+            f"/api/investigations/{inv_code}/bulk-evidence/",
+            [{"evidence_type": "ATOMIC", "summary": "Log purge via wevtutil"}],
+            format="json",
+        )
+        self.assertEqual(bulk_sub.status_code, 201)
+        self.assertEqual(bulk_sub.json()["count"], 1)
+
+        # Verify all 4 evidence items appear on the investigation timeline
+        inv_verify = self.client.get(f"/api/investigations/{inv_code}/").json()
+        self.assertEqual(len(inv_verify["timeline_events"]), 4)
+
+        # 7. Query evidence list filtered by ?investigation=INV######
+        ev_list = self.client.get(f"/api/evidence/?investigation={inv_code}").json()
+        self.assertEqual(len(ev_list), 4)
+
+        # 8. SOC Ingest webhook using "investigation": "INV######"
+        soc_res = self.client.post(
+            "/api/soc/ingest/",
+            {
+                "investigation": inv_code,
+                "evidence_type": "ATOMIC",
+                "summary": "Outbound C2 alert from perimeter firewall",
+                "affected_asset": "GW-PERIMETER-01",
+            },
+            format="json",
+        )
+        self.assertEqual(soc_res.status_code, 201)
+
+

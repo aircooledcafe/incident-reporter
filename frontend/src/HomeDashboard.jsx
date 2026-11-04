@@ -238,12 +238,15 @@ export default function HomeDashboard({
               <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 pb-2 mb-3 border-bottom border-secondary">
                 <div>
                   <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+                    <span className="badge bg-dark border border-info text-lb-cyan mono-text fs-6">
+                      {project.investigation_id || `INV${String(project.id).padStart(6, '0')}`}
+                    </span>
                     <button
                       type="button"
                       onClick={() => onOpenInvestigation(project.id)}
                       className="btn btn-link p-0 text-start text-white fw-semibold text-decoration-none fs-5"
                     >
-                      {project.title || `Investigation #${project.id}`}
+                      {project.title || `Investigation ${project.investigation_id || '#' + project.id}`}
                     </button>
 
                     <Badge

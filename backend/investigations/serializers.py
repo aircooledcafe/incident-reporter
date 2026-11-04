@@ -503,10 +503,24 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
         data = data.copy()
         if 'project' in data and 'investigation' not in data:
             data['investigation'] = data['project']
+        inv_val = data.get('investigation')
+        if inv_val is not None:
+            inv_str = str(inv_val).strip()
+            if not inv_str.isdigit() or inv_str.upper().startswith('INV'):
+                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
+                if inv_obj:
+                    data['investigation'] = inv_obj.pk
+                else:
+                    raise serializers.ValidationError({
+                        'investigation': f"Investigation with ID '{inv_str}' does not exist."
+                    })
         return super().to_internal_value(data)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        inv_code = getattr(instance.investigation, 'investigation_id', '') if instance.investigation else ''
+        ret['investigation_id'] = inv_code
+        ret['investigation_code'] = inv_code
         ret['project'] = instance.investigation_id
         return ret
 
@@ -557,10 +571,24 @@ class RelatedIncidentSerializer(serializers.ModelSerializer):
         data = data.copy()
         if 'project' in data and 'investigation' not in data:
             data['investigation'] = data['project']
+        inv_val = data.get('investigation')
+        if inv_val is not None:
+            inv_str = str(inv_val).strip()
+            if not inv_str.isdigit() or inv_str.upper().startswith('INV'):
+                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
+                if inv_obj:
+                    data['investigation'] = inv_obj.pk
+                else:
+                    raise serializers.ValidationError({
+                        'investigation': f"Investigation with ID '{inv_str}' does not exist."
+                    })
         return super().to_internal_value(data)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        inv_code = getattr(instance.investigation, 'investigation_id', '') if instance.investigation else ''
+        ret['investigation_id'] = inv_code
+        ret['investigation_code'] = inv_code
         ret['project'] = instance.investigation_id
         return ret
 
@@ -608,9 +636,23 @@ class CustomerContactSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         data = data.copy()
+        cust_val = data.get('customer')
+        if cust_val is not None and isinstance(cust_val, str) and not cust_val.isdigit():
+            cust_obj = Customer.objects.filter(customer_id__iexact=cust_val.strip()).first()
+            if cust_obj:
+                data['customer'] = cust_obj.pk
+            else:
+                raise serializers.ValidationError({
+                    'customer': f"Customer with code '{cust_val}' does not exist."
+                })
         if 'project' in data and 'customer' not in data:
             proj_id = data.get('project')
-            inv = Investigation.objects.filter(pk=proj_id).first()
+            inv = None
+            if proj_id is not None:
+                p_str = str(proj_id).strip()
+                inv = Investigation.objects.filter(investigation_id__iexact=p_str).first()
+                if not inv and p_str.isdigit():
+                    inv = Investigation.objects.filter(pk=int(p_str)).first()
             if inv:
                 data['customer'] = inv.customer_id
         return super().to_internal_value(data)
@@ -670,15 +712,30 @@ class ExternalResearchSerializer(serializers.ModelSerializer):
         data = data.copy()
         if 'project' in data and 'investigation' not in data:
             data['investigation'] = data['project']
+        inv_val = data.get('investigation')
+        if inv_val is not None:
+            inv_str = str(inv_val).strip()
+            if not inv_str.isdigit() or inv_str.upper().startswith('INV'):
+                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
+                if inv_obj:
+                    data['investigation'] = inv_obj.pk
+                else:
+                    raise serializers.ValidationError({
+                        'investigation': f"Investigation with ID '{inv_str}' does not exist."
+                    })
         return super().to_internal_value(data)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        inv_code = getattr(instance.investigation, 'investigation_id', '') if instance.investigation else ''
+        ret['investigation_id'] = inv_code
+        ret['investigation_code'] = inv_code
         ret['project'] = instance.investigation_id
         return ret
 
 
 class InvestigationSerializer(serializers.ModelSerializer):
+    investigation_id = serializers.CharField(required=False)
     customer_detail = CustomerSerializer(source='customer', read_only=True)
     customer_contacts = CustomerContactSerializer(source='customer.contacts', many=True, read_only=True)
     customer_name = serializers.CharField(source='customer.name', read_only=True)
@@ -708,6 +765,7 @@ class InvestigationSerializer(serializers.ModelSerializer):
         model = Investigation
         fields = [
             'id',
+            'investigation_id',
             'customer',
             'customer_detail',
             'customer_name',
@@ -765,6 +823,49 @@ class InvestigationSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        cust_val = data.get('customer') or data.get('customer_id') or data.get('customer_code')
+        if cust_val is not None:
+            if isinstance(cust_val, str) and not cust_val.isdigit():
+                cust_obj = Customer.objects.filter(customer_id__iexact=cust_val.strip()).first()
+                if not cust_obj:
+                    cust_obj = Customer.objects.filter(name__iexact=cust_val.strip()).first()
+                if cust_obj:
+                    data['customer'] = cust_obj.pk
+                else:
+                    cust_name = (data.get('customer_name') or f"Customer {cust_val.strip()}").strip()
+                    cust_obj, _ = Customer.objects.get_or_create(
+                        customer_id=cust_val.strip(),
+                        defaults={'name': cust_name},
+                    )
+                    data['customer'] = cust_obj.pk
+            elif isinstance(cust_val, (int, str)):
+                try:
+                    pk_val = int(cust_val)
+                    cust_obj = Customer.objects.filter(pk=pk_val).first()
+                    if not cust_obj:
+                        cust_obj = Customer.objects.filter(customer_id=str(cust_val)).first()
+                    if cust_obj:
+                        data['customer'] = cust_obj.pk
+                except ValueError:
+                    pass
+
+        inv_code = data.get('investigation_id') or data.get('code')
+        if inv_code and isinstance(inv_code, str):
+            data['investigation_id'] = inv_code.strip().upper()
+
+        return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['investigation_id'] = instance.investigation_id
+        ret['code'] = instance.investigation_id
+        ret['customer_code'] = instance.customer.customer_id if instance.customer else ""
+        ret['customer_id'] = instance.customer.customer_id if instance.customer else ""
+        ret['customer_pk'] = instance.customer.id if instance.customer else None
+        return ret
 
     def get_customer_id(self, obj) -> str:
         if obj.customer_id and obj.customer:

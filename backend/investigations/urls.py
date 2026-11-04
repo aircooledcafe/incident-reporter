@@ -32,6 +32,7 @@ router.register(r'customer-contacts', CustomerContactViewSet, basename='customer
 router.register(r'investigations', InvestigationViewSet, basename='investigation')
 router.register(r'projects', ProjectViewSet, basename='project')
 router.register(r'evidence', EvidenceItemViewSet, basename='evidence')
+router.register(r'evidence-items', EvidenceItemViewSet, basename='evidence-item')
 router.register(r'related-incidents', RelatedIncidentViewSet, basename='related-incident')
 router.register(r'external-research', ExternalResearchViewSet, basename='external-research')
 router.register(r'screenshots', EvidenceScreenshotViewSet, basename='screenshot')

@@ -231,6 +231,35 @@ class InvestigationManager(models.Manager):
         return super().create(**kwargs)
 
 
+def generate_next_investigation_id() -> str:
+    """
+    Generates a unique human-friendly investigation ID in format INV###### (e.g. INV000001, INV000009).
+    Finds the highest existing INV###### number starting from 0 and increments it,
+    starting from INV000001.
+    """
+    import re
+
+    existing_ids = Investigation.objects.filter(
+        investigation_id__startswith='INV'
+    ).values_list('investigation_id', flat=True)
+
+    max_num = 0
+    for iid in existing_ids:
+        match = re.search(r'^INV(\d{6})$', str(iid).upper())
+        if match:
+            num = int(match.group(1))
+            # Standard auto-generated IDs start from 0 (e.g. INV000001 to INV099999).
+            # Avoid letting custom high IDs (e.g. INV123456) or legacy 100000+ skew the counter.
+            if num < 100000 and num > max_num:
+                max_num = num
+
+    candidate = f"INV{max_num + 1:06d}"
+    while Investigation.objects.filter(investigation_id=candidate).exists():
+        max_num += 1
+        candidate = f"INV{max_num + 1:06d}"
+    return candidate
+
+
 class Investigation(models.Model):
     STATUS_CHOICES = [
         ('OPEN', 'Open / Triage'),
@@ -241,6 +270,12 @@ class Investigation(models.Model):
 
     objects = InvestigationManager()
 
+    investigation_id = models.CharField(
+        max_length=32,
+        unique=True,
+        blank=True,
+        help_text="Human-usable ID in format INV123456",
+    )
     customer = models.ForeignKey(
         Customer,
         on_delete=models.PROTECT,
@@ -295,7 +330,8 @@ class Investigation(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return self.title or f"Investigation #{self.pk}"
+        code = self.investigation_id or f"#{self.pk}"
+        return f"[{code}] {self.title or 'Untitled Investigation'}"
 
     @property
     def customer_name(self) -> str:
@@ -466,6 +502,11 @@ class Investigation(models.Model):
             pass
 
     def save(self, *args, **kwargs):
+        if not self.investigation_id:
+            self.investigation_id = generate_next_investigation_id()
+        else:
+            self.investigation_id = str(self.investigation_id).strip().upper()
+
         if not self.customer_id:
             default_cust, _ = Customer.objects.get_or_create(
                 name="Default Organization",

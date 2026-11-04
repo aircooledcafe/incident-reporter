@@ -41,6 +41,7 @@ import {
   Network,
   Download,
   Building2,
+  X,
 } from 'lucide-react';
 import { api } from './api';
 import HomeDashboard from './HomeDashboard';
@@ -95,6 +96,7 @@ const DEFAULT_DEMO_SCENARIOS = [
 ];
 
 const EMPTY_INVESTIGATION_FORM = {
+  investigation_id: '',
   title: '',
   customer: '',
   customer_name: '',
@@ -258,6 +260,14 @@ export default function App() {
   const [demoScenarios, setDemoScenarios] = useState(DEFAULT_DEMO_SCENARIOS);
   const [customers, setCustomers] = useState([]);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showQuickCustomer, setShowQuickCustomer] = useState(false);
+  const [quickCustomerForm, setQuickCustomerForm] = useState({
+    name: '',
+    customer_id: '',
+    notes: '',
+  });
+  const [savingQuickCustomer, setSavingQuickCustomer] = useState(false);
+  const [quickCustomerError, setQuickCustomerError] = useState('');
 
   // Sidebar Archived/Closed & Locked filters (both hidden by default)
   const [showArchivedSidebar, setShowArchivedSidebar] = useState(false);
@@ -754,8 +764,52 @@ export default function App() {
     }
   };
 
+  const handleQuickAddCustomer = async (e) => {
+    e?.preventDefault?.();
+    const name = quickCustomerForm.name.trim();
+    const code = quickCustomerForm.customer_id.trim();
+    if (!name) {
+      setQuickCustomerError('Customer organization name is required.');
+      return;
+    }
+    if (!code) {
+      setQuickCustomerError('Customer code / ID (e.g. CUST-01) is required.');
+      return;
+    }
+    setSavingQuickCustomer(true);
+    setQuickCustomerError('');
+    try {
+      const newCust = await api.createCustomer({
+        name,
+        customer_id: code,
+        notes: quickCustomerForm.notes.trim(),
+      });
+      await loadCustomers();
+      setProjectForm((prev) => ({
+        ...prev,
+        customer: newCust.id,
+        customer_name: newCust.name,
+        customer_id: newCust.customer_id,
+      }));
+      setShowQuickCustomer(false);
+      setQuickCustomerForm({
+        name: '',
+        customer_id: '',
+        notes: '',
+      });
+      notifySuccess(`Customer "${newCust.name}" (${newCust.customer_id}) created and selected.`);
+    } catch (err) {
+      setQuickCustomerError(err.message || 'Failed to create customer');
+    } finally {
+      setSavingQuickCustomer(false);
+    }
+  };
+
   const openNewProjectModal = () => {
     setEditingProject(false);
+    setShowQuickCustomer(false);
+    setQuickCustomerError('');
+    setQuickCustomerForm({ name: '', customer_id: '', notes: '' });
     const defaultCust = customers[0];
     const defaultLead = analystDirectory.find((a) => a.id === authUser?.id) || analystDirectory[0];
     setProjectForm({
@@ -773,6 +827,7 @@ export default function App() {
     if (!activeProject) return;
     setEditingProject(true);
     setProjectForm({
+      investigation_id: activeProject.investigation_id || '',
       title: activeProject.title || '',
       customer: activeProject.customer || activeProject.customer_detail?.id || '',
       customer_name: activeProject.customer_name || '',
@@ -1819,8 +1874,15 @@ export default function App() {
                             }`}
                           >
                             <div className="d-flex justify-content-between align-items-start gap-1">
-                              <div className="fw-semibold small text-white text-truncate">
-                                {p.title || `Investigation #${p.id}`}
+                              <div className="text-truncate">
+                                <div className="mb-1">
+                                  <span className="badge bg-dark border border-info text-lb-cyan mono-text" style={{ fontSize: '0.68rem' }}>
+                                    {p.investigation_id || `INV${String(p.id).padStart(6, '0')}`}
+                                  </span>
+                                </div>
+                                <div className="fw-semibold small text-white text-truncate">
+                                  {p.title || `Investigation ${p.investigation_id || '#' + p.id}`}
+                                </div>
                               </div>
                               {p.is_locked && (
                                 <Lock
@@ -1899,9 +1961,12 @@ export default function App() {
                   {/* Investigation Header */}
                   <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary">
                     <div>
-                      <div className="d-flex align-items-center gap-2 mb-1">
+                      <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+                        <Badge bg="dark" className="border border-info text-lb-cyan fs-6 mono-text">
+                          {activeProject.investigation_id || `INV${String(activeProject.id).padStart(6, '0')}`}
+                        </Badge>
                         <h4 className="mb-0 text-white fw-semibold">
-                          {activeProject.title || `Investigation #${activeProject.id}`}
+                          {activeProject.title || `Investigation ${activeProject.investigation_id || '#' + activeProject.id}`}
                         </h4>
                         {isProjectLocked && (
                           <Badge bg="warning" text="dark" className="d-inline-flex align-items-center gap-1">
@@ -1911,8 +1976,9 @@ export default function App() {
                         )}
                       </div>
                       <div className="text-secondary small d-flex flex-wrap align-items-center gap-3">
+                        <span>ID: <strong className="text-lb-cyan mono-text">{activeProject.investigation_id || `INV${String(activeProject.id).padStart(6, '0')}`}</strong></span>
                         <span>Customer: {activeProject.customer_name || 'N/A'}</span>
-                        <span>Customer ID: {activeProject.customer_id || 'N/A'}</span>
+                        <span>Customer ID: <strong className="text-light mono-text">{activeProject.customer_id || 'N/A'}</strong></span>
                         <span>
                           Ticket:{' '}
                           {activeProject.ticket_link ? (
@@ -2986,10 +3052,10 @@ export default function App() {
               <Modal.Title className="fs-6 mb-0 text-white">
                 {editingProject ? 'Edit Investigation Overview' : 'New Investigation'}
               </Modal.Title>
-              <Badge bg="dark" className="border border-info text-lb-cyan fw-normal">
+              <Badge bg="dark" className="border border-info text-lb-cyan fw-normal mono-text">
                 {editingProject
-                  ? `Investigation #${activeProject?.id || ''}`
-                  : 'Investigation Setup'}
+                  ? (activeProject?.investigation_id || `INV${String(activeProject?.id || '').padStart(6, '0')}`)
+                  : 'Investigation Setup (Auto ID)'}
               </Badge>
             </div>
           </Modal.Header>
@@ -3029,15 +3095,122 @@ export default function App() {
                   <Form.Group>
                     <div className="d-flex justify-content-between align-items-center mb-1">
                       <Form.Label className="small text-secondary mb-0">Customer</Form.Label>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="p-0 text-lb-cyan small text-decoration-none"
-                        onClick={() => setShowCustomerModal(true)}
-                      >
-                        + Manage Customers
-                      </Button>
+                      <div className="d-flex align-items-center gap-2">
+                        {canEditRole && (
+                          <Button
+                            variant="outline-info"
+                            size="sm"
+                            className="py-0 px-2 small text-lb-cyan d-flex align-items-center gap-1"
+                            type="button"
+                            onClick={() => {
+                              setShowQuickCustomer((prev) => !prev);
+                              setQuickCustomerError('');
+                            }}
+                          >
+                            <Plus size={12} />
+                            {showQuickCustomer ? 'Close' : 'New Customer'}
+                          </Button>
+                        )}
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="p-0 text-secondary small text-decoration-none"
+                          type="button"
+                          onClick={() => setShowCustomerModal(true)}
+                        >
+                          Manage All
+                        </Button>
+                      </div>
                     </div>
+
+                    {showQuickCustomer && (
+                      <div className="p-3 mb-2 rounded border border-info bg-dark-subtle">
+                        <div className="d-flex justify-content-between align-items-center mb-2">
+                          <div className="small fw-semibold text-lb-cyan d-flex align-items-center gap-1">
+                            <Building2 size={14} /> Quick Add Customer
+                          </div>
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="text-secondary p-0"
+                            type="button"
+                            onClick={() => setShowQuickCustomer(false)}
+                          >
+                            <X size={14} />
+                          </Button>
+                        </div>
+
+                        {quickCustomerError && (
+                          <Alert variant="danger" className="py-1 px-2 small mb-2">
+                            {quickCustomerError}
+                          </Alert>
+                        )}
+
+                        <div className="d-flex flex-column gap-2 mb-2">
+                          <div>
+                            <Form.Label className="small text-muted mb-0">Organization Name *</Form.Label>
+                            <Form.Control
+                              size="sm"
+                              type="text"
+                              placeholder="e.g. Scadrial Metallurgy"
+                              value={quickCustomerForm.name}
+                              onChange={(e) =>
+                                setQuickCustomerForm({ ...quickCustomerForm, name: e.target.value })
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Form.Label className="small text-muted mb-0">Customer Code / ID *</Form.Label>
+                            <Form.Control
+                              size="sm"
+                              type="text"
+                              className="mono-text"
+                              placeholder="e.g. SCAD-01"
+                              value={quickCustomerForm.customer_id}
+                              onChange={(e) => setQuickCustomerForm({ ...quickCustomerForm, customer_id: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <Form.Label className="small text-muted mb-0">Notes (Optional)</Form.Label>
+                            <Form.Control
+                              size="sm"
+                              type="text"
+                              placeholder="e.g. Mining syndicate & warehouse"
+                              value={quickCustomerForm.notes}
+                              onChange={(e) => setQuickCustomerForm({ ...quickCustomerForm, notes: e.target.value })}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="d-flex justify-content-end gap-2 pt-1">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            type="button"
+                            onClick={() => setShowQuickCustomer(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            className="btn-lb-cyan"
+                            size="sm"
+                            type="button"
+                            disabled={savingQuickCustomer}
+                            onClick={handleQuickAddCustomer}
+                          >
+                            {savingQuickCustomer ? (
+                              <>
+                                <Spinner size="sm" animation="border" className="me-1" />
+                                Creating...
+                              </>
+                            ) : (
+                              'Create & Select'
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
                     {customers && customers.length > 0 ? (
                       <Form.Select
                         value={projectForm.customer || ''}
@@ -3070,8 +3243,13 @@ export default function App() {
                       />
                     )}
                     {projectForm.customer_id && (
-                      <div className="mt-1 small text-muted mono-text">
-                        Customer Code: <span className="text-lb-cyan">{projectForm.customer_id}</span>
+                      <div className="mt-1 small text-muted mono-text d-flex align-items-center gap-2">
+                        <span>Customer Code: <span className="text-lb-cyan">{projectForm.customer_id}</span></span>
+                        {projectForm.customer && (
+                          <Badge bg="dark" className="border border-success text-success fw-normal">
+                            Selected
+                          </Badge>
+                        )}
                       </div>
                     )}
                   </Form.Group>
@@ -4222,6 +4400,14 @@ export default function App() {
         canManage={canEditRole}
         onNotifySuccess={notifySuccess}
         onNotifyError={(msg) => handleApiError(null, msg)}
+        onCustomerCreated={(newCust) => {
+          setProjectForm((prev) => ({
+            ...prev,
+            customer: newCust.id,
+            customer_name: newCust.name,
+            customer_id: newCust.customer_id,
+          }));
+        }}
         onCustomerUpdated={async () => {
           await loadCustomers();
           if (activeProject) {
