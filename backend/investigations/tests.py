@@ -353,12 +353,12 @@ class IncidentReporterTests(TestCase):
             self.assertEqual(self.client.get("/api/projects/demo_scenarios/").status_code, 403)
             self.assertEqual(self.client.post("/api/projects/seed_demo/").status_code, 403)
 
-        # Super Admin CAN list and load all 4 themed sample scenarios
+        # Super Admin CAN list and load all 5 themed sample scenarios
         self.client.force_authenticate(user=self.super_admin)
         cat_res = self.client.get("/api/projects/demo_scenarios/")
         self.assertEqual(cat_res.status_code, 200)
         scenario_ids = [s["id"] for s in cat_res.json()]
-        self.assertEqual(scenario_ids, ["expanse", "star_trek", "matrix", "star_wars"])
+        self.assertEqual(scenario_ids, ["expanse", "star_trek", "matrix", "star_wars", "god_of_war"])
 
         # 1. Expanse scenario (default)
         expanse_res = self.client.post("/api/projects/seed_demo/", {"scenario": "expanse"}, format="json")
@@ -391,6 +391,15 @@ class IncidentReporterTests(TestCase):
         self.assertEqual(sw_res.status_code, 201)
         self.assertIn("MitM", sw_res.json()["title"])
         self.assertGreaterEqual(sw_res.json()["key_evidence_count"], 4)
+
+        # 5. God of War scenario (Fimbulwinter ransomware attack)
+        gow_res = self.client.post("/api/projects/seed_demo/", {"scenario": "god_of_war"}, format="json")
+        self.assertEqual(gow_res.status_code, 201)
+        self.assertIn("Ransomware", gow_res.json()["title"])
+        self.assertEqual(gow_res.json()["customer_name"], "Midgard Realmworks Technologies")
+        self.assertGreaterEqual(gow_res.json()["key_evidence_count"], 4)
+        self.assertEqual(len(gow_res.json()["related_incidents"]), 3)
+        self.assertEqual(len(gow_res.json()["customer_contacts"]), 3)
 
     def test_profile_avatar_preferred_display_name_and_pronouns(self):
         self.client.force_authenticate(user=self.analyst_user)

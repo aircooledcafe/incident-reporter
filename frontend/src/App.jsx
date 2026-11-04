@@ -1479,7 +1479,7 @@ export default function App() {
                         onClick={() => handleSeedDemo('all')}
                       >
                         <Sparkles size={14} />
-                        <span>Load All 4 Sample Investigations</span>
+                        <span>Load All {demoScenarios?.length || 5} Sample Investigations</span>
                       </button>
                     </div>
                   </div>

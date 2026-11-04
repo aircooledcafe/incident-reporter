@@ -6,6 +6,7 @@ Scenarios included:
   2. star_trek — Star Trek: Subspace Portal Website Compromise, Web Shell Deployment & DB Credential Theft
   3. matrix    — The Matrix: ClickFix Clipboard Execution Lure to Domain Controller DCSync Takeover
   4. star_wars — Star Wars: Adversary-in-the-Middle (MitM) Phishing, Spam Campaign & Multi-Account Takeover
+  5. god_of_war — God of War: Fimbulwinter Ransomware Deployment, Volume Shadow Deletion & Domain Takeover
 """
 
 import io
@@ -69,6 +70,16 @@ DEMO_SCENARIO_CATALOG = [
         "description": (
             "Adversary-in-the-Middle (AiTM/MitM) reverse-proxy phishing capturing MFA session cookies, "
             "stealth inbox rules, internal/partner spam distribution, and multi-account takeovers."
+        ),
+    },
+    {
+        "id": "god_of_war",
+        "theme": "God of War",
+        "label": "God of War — Fimbulwinter Ransomware Deployment & Domain Takeover",
+        "customer_name": "Midgard Realmworks Technologies",
+        "description": (
+            "Citrix/RDP brute force, Mimikatz LSASS dumping on admin workstation, BYOVD defense evasion "
+            "killing EDR, Volume Shadow Copy destruction, and enterprise-wide Fimbulwinter ransomware encryption."
         ),
     },
 ]
@@ -1417,17 +1428,427 @@ def _get_star_wars_spec() -> dict:
     }
 
 
+def _get_god_of_war_spec() -> dict:
+    return {
+        "project": {
+            "title": "Fimbulwinter Ransomware Deployment, Volume Shadow Deletion & Domain-Wide Encryption",
+            "customer_name": "Midgard Realmworks Technologies",
+            "customer_id": "CUST-GOW-05",
+            "ticket_id": "SOC-2026-GOW77",
+            "ticket_link": "https://soc.internal.example/tickets/SOC-2026-GOW77",
+            "summary": (
+                "Threat actor (tracked as Fimbulwinter / Ragnarök Ransomware Cartel) gained initial access to "
+                "Midgard Realmworks via exposed Citrix/RDP gateway GW-ASGARD-01 using compromised contractor "
+                "credentials for MIDGARD\\a.spartan. The actor moved laterally to administrator workstation "
+                "WRK-KRATOS-04, performed LSASS memory credential dumping with Mimikatz, and obtained Domain Admin "
+                "privileges for MIDGARD\\adm_atreus. Operating from Domain Controller DC-YGGDRASIL-01, the adversary "
+                "created backdoor account MIDGARD\\adm_fimbulwinter, executed Cobalt Strike beacons to "
+                "c2.fimbulwinter-ops.net, terminated EDR and endpoint defense agents using BYOVD driver groot.sys, "
+                "wiped all Volume Shadow Copies across file and database servers (FS-MIDGARD-01, DB-VALHALLA-01, "
+                "HYPERV-NILFHEIM-01), stopped MSSQL and backup services, and deployed multi-threaded ransomware binary "
+                "fimbulwinter.exe encrypting network shares and local disks, appending the .RAGNAROK extension, and "
+                "dropping HOW_TO_RESTORE_MIDGARD_FILES.txt before containment."
+            ),
+            "action_plan": (
+                "1. Maintain hard VLAN network isolation for all Midgard production subnets; ensure perimeter firewalls drop all outbound traffic to C2 IPs 194.26.29.112 and 185.196.8.24.\n"
+                "2. Coordinate with designated incident response legal counsel and digital forensics partner regarding the Ragnarök ransomware extortion demand and onion leak site monitoring.\n"
+                "3. Validate immutable, offline air-gapped tape backup catalogs for production database DB-VALHALLA-01 and file server FS-MIDGARD-01 prior to bare-metal restoration.\n"
+                "4. Perform emergency double-reset of the KRBTGT Kerberos account across the MIDGARD Active Directory domain.\n"
+                "5. Rebuild Domain Controller DC-YGGDRASIL-01 from verified clean golden media, revoke all compromised accounts, and enforce hardware FIDO2 MFA across all external Citrix/remote access gateways."
+            ),
+            "key_customer_contacts": "24/7 Midgard Realm Emergency War Room: +1-555-REALM-99 (Bridge Code: 4048#)",
+            "key_assets_affected": (
+                "GW-ASGARD-01 (10.30.1.10 - Perimeter Citrix Gateway)\n"
+                "DC-YGGDRASIL-01 (10.30.0.5 - Primary Domain Controller)\n"
+                "FS-MIDGARD-01 (10.30.4.15 - Enterprise File Server)\n"
+                "DB-VALHALLA-01 (10.30.8.20 - Production SQL Server)\n"
+                "HYPERV-NILFHEIM-01 (10.30.2.50 - Hyper-V Cluster Node)\n"
+                "WRK-KRATOS-04 (10.30.100.82 - Compromised Admin Workstation)"
+            ),
+            "key_users_affected": (
+                "MIDGARD\\a.spartan (Compromised Contractor Account)\n"
+                "MIDGARD\\adm_atreus (Compromised Domain Admin Account)\n"
+                "MIDGARD\\svc_hyperv_backup (Compromised Service Account)\n"
+                "MIDGARD\\adm_fimbulwinter (Attacker-Created Rogue Domain Admin)"
+            ),
+            "key_malicious_indicators": (
+                "194.26.29.112 (Cobalt Strike C2 Server)\n"
+                "185.196.8.24 (Data Exfiltration Drop Server)\n"
+                "109.236.81.45 (RDP Brute-Force Origin IP)\n"
+                "c2.fimbulwinter-ops.net (Adversary C2 Domain)\n"
+                "ragnarok-leak-portal.onion (TOR Ransom Leak Site)\n"
+                "fimbulwinter.exe (SHA256: e8b94109f2208a731d6e872c011985da33bc88219461df893bc4428019a3b612)\n"
+                "groot.sys (BYOVD Vulnerable Signed Driver)\n"
+                "vssadmin.exe delete shadows /all /quiet\n"
+                "wbadmin.exe delete catalog -quiet\n"
+                "HOW_TO_RESTORE_MIDGARD_FILES.txt (Ransom Note)\n"
+                ".RAGNAROK (Encrypted File Extension)"
+            ),
+            "status": "INVESTIGATING",
+            "lead_analyst": "Kratos of Sparta",
+        },
+        "contacts": [
+            {
+                "name": "Atreus (Loki)",
+                "role_title": "Principal Systems Architect",
+                "email": "atreus@midgard-realmworks.example",
+                "phone": "+1-555-0720",
+                "notes": "Primary technical contact who first reported .RAGNAROK encrypted files across network shares.",
+            },
+            {
+                "name": "Brok & Sindri (Huldra Brothers)",
+                "role_title": "Senior Infrastructure & Storage Engineers",
+                "email": "huldra.forge@midgard-realmworks.example",
+                "phone": "+1-555-0733",
+                "notes": "Supervising SAN storage isolation and verifying air-gapped tape backup sets.",
+            },
+            {
+                "name": "Freya",
+                "role_title": "Chief Information Security Officer",
+                "email": "freya.ciso@midgard-realmworks.example",
+                "phone": "+1-555-0799",
+                "notes": "Executive incident commander managing Board briefings and legal disclosures.",
+            },
+        ],
+        "related_incidents": [
+            {
+                "title": "INC-2026-8801: CRITICAL ALERT: Mass Volume Shadow Copy Deletion Detected via vssadmin",
+                "link": "https://soc.internal.example/escalations/INC-2026-8801",
+                "analyst_name": "Mimir",
+            },
+            {
+                "title": "INC-2026-8802: FIREWALL ALERT: High-Frequency Outbound Beaconing to Known Ransomware C2 194.26.29.112",
+                "link": "https://soc.internal.example/escalations/INC-2026-8802",
+                "analyst_name": "Kratos of Sparta",
+            },
+            {
+                "title": "INC-2026-8803: EDR ALERT: Kernel Driver Exploit (BYOVD) Terminating Endpoint Protection on DB-VALHALLA-01",
+                "link": "https://soc.internal.example/escalations/INC-2026-8803",
+                "analyst_name": "Mimir",
+            },
+        ],
+        "research": [
+            {
+                "link": "https://attack.mitre.org/techniques/T1486/",
+                "summary": "MITRE ATT&CK T1486 - Data Encrypted for Impact: Fimbulwinter / Ragnarök Ransomware technical analysis.",
+                "analyst_name": "Kratos of Sparta",
+            },
+            {
+                "link": "https://attack.mitre.org/techniques/T1490/",
+                "summary": "MITRE ATT&CK T1490 - Inhibit System Recovery: Volume Shadow Copy and backup catalog wiping techniques.",
+                "analyst_name": "Mimir",
+            },
+            {
+                "link": "https://attack.mitre.org/techniques/T1562/001/",
+                "summary": "MITRE ATT&CK T1562.001 - Impair Defenses: Bring-Your-Own-Vulnerable-Driver (BYOVD) groot.sys kernel exploit.",
+                "analyst_name": "Mimir",
+            },
+        ],
+        "events": [
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_SEARCH,
+                "analyst": "Kratos of Sparta",
+                "ts": datetime(2026, 10, 28, 1, 14, 2, tzinfo=dt_timezone.utc),
+                "end_ts": datetime(2026, 10, 28, 1, 20, 18, tzinfo=dt_timezone.utc),
+                "asset": "GW-ASGARD-01 (10.30.1.10)",
+                "user": "MIDGARD\\a.spartan",
+                "attacker_user": False,
+                "summary": "External RDP password spraying against perimeter Citrix gateway GW-ASGARD-01 from 109.236.81.45 resulting in successful authentication for contractor account MIDGARD\\a.spartan.",
+                "notes": "SIEM captured 248 failed logon attempts across 40 accounts prior to successful credential match on a.spartan.",
+                "indicators": "109.236.81.45",
+                "cmd": "",
+                "tactic": "Initial Access (TA0001); Credential Access (TA0006)",
+                "technique": "T1110.003 - Password Spraying; T1133 - External Remote Services",
+                "log_link": "https://siem.internal.example/events/citrix-auth-77192",
+                "res_link": "https://siem.internal.example/app/discover#/view/citrix-rdp-spray",
+                "qry_link": "https://siem.internal.example/app/discover#/?_q=(source.ip:109.236.81.45%20AND%20event.category:authentication)",
+                "key": True,
+                "shot": (
+                    "rdp_spray_auth_success.png",
+                    "SIEM Auth Logs: External RDP Spray & Breach of MIDGARD\\a.spartan",
+                    [
+                        "[SIEM] index=perimeter_gw src_ip=109.236.81.45 event=logon",
+                        "01:14:02 - 01:19:55 UTC | status=FAILURE | attempts=248 | target=GW-ASGARD-01",
+                        "01:20:18 UTC            | status=SUCCESS | user=MIDGARD\\a.spartan | auth=citrix_gateway",
+                        "Assigned Gateway Session ID: CTX-SESSION-992144",
+                    ],
+                ),
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Mimir",
+                "ts": datetime(2026, 10, 28, 1, 31, 10, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "GW-ASGARD-01 (10.30.1.10)",
+                "user": "MIDGARD\\a.spartan",
+                "attacker_user": False,
+                "summary": "Adversary executed SharpHound / BloodHound collector to map Active Directory attack paths to Domain Admins.",
+                "notes": "PowerShell process spawned SharpHound binary from C:\\Windows\\Temp\\sharphound.exe.",
+                "indicators": "sharphound.exe, 20261028_BloodHound.zip",
+                "cmd": "powershell.exe -ExecutionPolicy Bypass -Command Invoke-BloodHound -CollectionMethod All -Domain midgard.realm -ZipFileName C:\\Windows\\Temp\\20261028_BloodHound.zip",
+                "tactic": "Discovery (TA0007)",
+                "technique": "T1087.002 - Account Discovery: Domain Account; T1069.002 - Permission Groups Discovery: Domain Groups",
+                "log_link": "https://edr.internal.example/alerts/ps-sharphound-3301",
+                "res_link": "",
+                "qry_link": "",
+                "key": True,
+                "shot": (
+                    "bloodhound_ad_recon.png",
+                    "EDR Process Telemetry: SharpHound BloodHound Collector Execution",
+                    [
+                        "[EDR] Agent: GW-ASGARD-01 (10.30.1.10) | Process Creation Alert",
+                        "PID: 4892 | Parent: powershell.exe (PID: 3204) | User: MIDGARD\\a.spartan",
+                        "CmdLine: Invoke-BloodHound -CollectionMethod All -Domain midgard.realm",
+                        "Target JSON output: C:\\Windows\\Temp\\20261028_BloodHound.zip [4.2 MB]",
+                    ],
+                ),
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Kratos of Sparta",
+                "ts": datetime(2026, 10, 28, 1, 46, 25, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "WRK-KRATOS-04 (10.30.100.82)",
+                "user": "MIDGARD\\a.spartan",
+                "attacker_user": False,
+                "summary": "RDP connection initiated from gateway 10.30.1.10 to Tier-1 administrative workstation WRK-KRATOS-04.",
+                "notes": "Windows Event ID 4624 (Logon Type 10) confirms lateral movement across internal subnets.",
+                "indicators": "10.30.1.10, 10.30.100.82",
+                "cmd": "mstsc.exe /v:10.30.100.82",
+                "tactic": "Lateral Movement (TA0008)",
+                "technique": "T1021.001 - Remote Services: Remote Desktop Protocol",
+                "log_link": "https://siem.internal.example/events/event-4624-rdp-kratos04",
+                "res_link": "",
+                "qry_link": "",
+                "key": False,
+                "shot": None,
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Mimir",
+                "ts": datetime(2026, 10, 28, 1, 54, 40, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "WRK-KRATOS-04 (10.30.100.82)",
+                "user": "MIDGARD\\a.spartan",
+                "attacker_user": False,
+                "summary": "LSASS credential harvesting via Mimikatz extracting cleartext NTLM hashes and credentials for Domain Admin MIDGARD\\adm_atreus.",
+                "notes": "Adversary elevated privileges using SeDebugPrivilege and dumped credentials from memory.",
+                "indicators": "mimikatz.exe, sekurlsa::logonpasswords",
+                "cmd": "mimikatz.exe \"privilege::debug\" \"sekurlsa::logonpasswords\" \"exit\"",
+                "tactic": "Credential Access (TA0006); Privilege Escalation (TA0004)",
+                "technique": "T1003.001 - OS Credential Dumping: LSASS Memory",
+                "log_link": "https://edr.internal.example/alerts/mimikatz-lsass-99401",
+                "res_link": "",
+                "qry_link": "",
+                "key": True,
+                "shot": (
+                    "mimikatz_lsass_dump.png",
+                    "Memory Extraction: Mimikatz sekurlsa::logonpasswords on WRK-KRATOS-04",
+                    [
+                        "[MIMIKATZ] privilege::debug -> OK: SeDebugPrivilege enabled",
+                        "[MIMIKATZ] sekurlsa::logonpasswords",
+                        "Authentication Id : 0 ; 998812 (00000000:000f3d9c)",
+                        "User Name         : adm_atreus",
+                        "Domain            : MIDGARD.REALM",
+                        "NTLM Hash         : b48e10c7329ea109f2771c5049a218f0 -> DOMAIN ADMIN",
+                    ],
+                ),
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Kratos of Sparta",
+                "ts": datetime(2026, 10, 28, 2, 10, 15, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "DC-YGGDRASIL-01 (10.30.0.5)",
+                "user": "MIDGARD\\adm_atreus",
+                "attacker_user": False,
+                "summary": "Compromised Domain Admin credentials used to establish interactive WinRM session on Primary Domain Controller DC-YGGDRASIL-01.",
+                "notes": "Remote PowerShell management connection from 10.30.100.82.",
+                "indicators": "10.30.100.82, 10.30.0.5",
+                "cmd": "Enter-PSSession -ComputerName DC-YGGDRASIL-01 -Credential MIDGARD\\adm_atreus",
+                "tactic": "Lateral Movement (TA0008)",
+                "technique": "T1021.006 - Remote Services: Windows Remote Management",
+                "log_link": "https://siem.internal.example/events/winrm-session-88210",
+                "res_link": "",
+                "qry_link": "",
+                "key": False,
+                "shot": None,
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Mimir",
+                "ts": datetime(2026, 10, 28, 2, 21, 5, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "DC-YGGDRASIL-01 (10.30.0.5)",
+                "user": "MIDGARD\\adm_fimbulwinter",
+                "attacker_user": True,
+                "summary": "Rogue backdoor Domain Admin account created on Domain Controller: MIDGARD\\adm_fimbulwinter.",
+                "notes": "User added directly to Domain Admins and Enterprise Admins security groups.",
+                "indicators": "MIDGARD\\adm_fimbulwinter",
+                "cmd": "net user adm_fimbulwinter Ragnarok2026! /add /domain & net group \"Domain Admins\" adm_fimbulwinter /add /domain & net group \"Enterprise Admins\" adm_fimbulwinter /add /domain",
+                "tactic": "Persistence (TA0003); Privilege Escalation (TA0004)",
+                "technique": "T1136.002 - Create Account: Domain Account; T1098 - Account Manipulation",
+                "log_link": "https://siem.internal.example/events/event-4720-user-created",
+                "res_link": "",
+                "qry_link": "",
+                "key": True,
+                "shot": None,
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_SEARCH,
+                "analyst": "Kratos of Sparta",
+                "ts": datetime(2026, 10, 28, 2, 38, 20, tzinfo=dt_timezone.utc),
+                "end_ts": datetime(2026, 10, 28, 3, 55, 0, tzinfo=dt_timezone.utc),
+                "asset": "DC-YGGDRASIL-01 (10.30.0.5)",
+                "user": "MIDGARD\\adm_fimbulwinter",
+                "attacker_user": True,
+                "summary": "Cobalt Strike HTTPS Beacon execution maintaining persistent encrypted command-and-control channel to 194.26.29.112.",
+                "notes": "Beacon established jittered 5-second heartbeats to c2.fimbulwinter-ops.net.",
+                "indicators": "194.26.29.112, c2.fimbulwinter-ops.net",
+                "cmd": "powershell.exe -nop -w hidden -enc JABzAD0ATgBlAHcALQBPAGIAagBlAGMAdAAgAEkATwAuAE0AZQBtAG8AcgB5AFMAdAByAGUAYQBt...",
+                "tactic": "Command and Control (TA0011)",
+                "technique": "T1071.001 - Application Layer Protocol: Web Protocols; T1059.001 - Command and Scripting Interpreter: PowerShell",
+                "log_link": "https://fw.internal.example/traffic/c2-beacon-194-26-29-112",
+                "res_link": "https://siem.internal.example/app/discover#/view/c2-beaconing-194-26",
+                "qry_link": "https://siem.internal.example/app/discover#/?_q=(destination.ip:194.26.29.112%20AND%20destination.port:443)",
+                "key": True,
+                "shot": None,
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Mimir",
+                "ts": datetime(2026, 10, 28, 3, 6, 50, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "DB-VALHALLA-01 (10.30.8.20)",
+                "user": "MIDGARD\\adm_fimbulwinter",
+                "attacker_user": True,
+                "summary": "Defense Evasion via Bring-Your-Own-Vulnerable-Driver (BYOVD): vulnerable signed kernel driver groot.sys loaded to terminate EDR agents and Defender services.",
+                "notes": "Adversary leveraged kernel-mode memory write primitives to strip EDR process callbacks and kill security monitoring.",
+                "indicators": "groot.sys, terminate_edr.exe",
+                "cmd": "sc.exe create groot binPath= C:\\Windows\\Temp\\groot.sys type= kernel & sc.exe start groot & terminate_edr.exe --kill-all",
+                "tactic": "Defense Evasion (TA0005)",
+                "technique": "T1562.001 - Impair Defenses: Disable or Modify Tools; T1068 - Exploitation for Privilege Escalation",
+                "log_link": "https://edr.internal.example/events/byovd-driver-loaded-8802",
+                "res_link": "",
+                "qry_link": "",
+                "key": True,
+                "shot": (
+                    "byovd_edr_termination.png",
+                    "Kernel Telemetry: BYOVD Driver groot.sys Stripping EDR Process Callbacks",
+                    [
+                        "[KERNEL] DriverLoaded: C:\\Windows\\Temp\\groot.sys (Signed by valid CA)",
+                        "[ALERT] Unsigned code injection detected into ObRegisterCallbacks table",
+                        "[EDR] Sensor service 'SentinelAgentSvc.exe' terminated unexpectedly (Exit code 0xC0000005)",
+                        "[DEFENDER] WinDefend service stopped via kernel write override",
+                    ],
+                ),
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Kratos of Sparta",
+                "ts": datetime(2026, 10, 28, 3, 27, 15, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "FS-MIDGARD-01 (10.30.4.15)",
+                "user": "MIDGARD\\adm_fimbulwinter",
+                "attacker_user": True,
+                "summary": "System recovery destruction: Volume Shadow Copies deleted, backup catalogs purged, and boot recovery disabled via vssadmin and wbadmin.",
+                "notes": "Ensured local shadow copies could not be used to recover encrypted files.",
+                "indicators": "vssadmin.exe, wbadmin.exe, bcdedit.exe",
+                "cmd": "vssadmin.exe delete shadows /all /quiet & wbadmin.exe delete catalog -quiet & bcdedit.exe /set {default} bootstatuspolicy ignoreallfailures & bcdedit.exe /set {default} recoveryenabled no",
+                "tactic": "Impact (TA0040)",
+                "technique": "T1490 - Inhibit System Recovery",
+                "log_link": "https://siem.internal.example/events/vssadmin-deleted-9014",
+                "res_link": "",
+                "qry_link": "",
+                "key": True,
+                "shot": None,
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Mimir",
+                "ts": datetime(2026, 10, 28, 3, 43, 30, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "DB-VALHALLA-01 (10.30.8.20)",
+                "user": "MIDGARD\\adm_fimbulwinter",
+                "attacker_user": True,
+                "summary": "Forceful service termination of production database engines and Veeam backup agents to unlock file handles before encryption.",
+                "notes": "Database files (.mdf, .ldf) unmounted and made accessible for encryption.",
+                "indicators": "MSSQLSERVER, VeeamBackupSvc",
+                "cmd": "net stop MSSQLSERVER /y & net stop VeeamBackupSvc /y & taskkill.exe /F /IM sqlservr.exe /IM veeam.exe",
+                "tactic": "Impact (TA0040)",
+                "technique": "T1489 - Service Stop",
+                "log_link": "https://siem.internal.example/events/service-stop-mssql",
+                "res_link": "",
+                "qry_link": "",
+                "key": False,
+                "shot": None,
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_SEARCH,
+                "analyst": "Kratos of Sparta",
+                "ts": datetime(2026, 10, 28, 3, 57, 12, tzinfo=dt_timezone.utc),
+                "end_ts": datetime(2026, 10, 28, 4, 12, 45, tzinfo=dt_timezone.utc),
+                "asset": "FS-MIDGARD-01, DB-VALHALLA-01, HYPERV-NILFHEIM-01 (14 Hosts)",
+                "user": "MIDGARD\\adm_fimbulwinter",
+                "attacker_user": True,
+                "summary": "Fimbulwinter Ransomware payload executed across 14 hosts and network shares, encrypting files and appending .RAGNAROK extension.",
+                "notes": "Multi-threaded ransomware binary utilized ChaCha20 symmetric stream cipher and RSA-4096 master public key.",
+                "indicators": "fimbulwinter.exe, .RAGNAROK, HOW_TO_RESTORE_MIDGARD_FILES.txt",
+                "cmd": "fimbulwinter.exe --threads 16 --path \\\\*\\C$ --path \\\\*\\D$ --path \\\\*\\E$ --note HOW_TO_RESTORE_MIDGARD_FILES.txt",
+                "tactic": "Impact (TA0040)",
+                "technique": "T1486 - Data Encrypted for Impact",
+                "log_link": "https://siem.internal.example/events/ransomware-mass-encrypt-01",
+                "res_link": "https://siem.internal.example/app/discover#/view/ragnarok-mass-encryption",
+                "qry_link": "https://siem.internal.example/app/discover#/?_q=(file.extension:RAGNAROK%20OR%20file.name:HOW_TO_RESTORE_MIDGARD_FILES.txt)",
+                "key": True,
+                "shot": (
+                    "fimbulwinter_ransomware_execution.png",
+                    "Ransomware Execution: Fimbulwinter Binary & Ragnarök Extortion Note",
+                    [
+                        "[FIMBULWINTER RANSOMWARE v3.4] Initializing 16 worker threads...",
+                        "[ENCRYPTION] Target volumes: C:\\, D:\\, E:\\, Shared SAN LUNs (Total: 4.8 TB)",
+                        "[ENCRYPTION] Completed: 842,910 files encrypted -> Extension: .RAGNAROK",
+                        "[EXTORTION] Dropped ransom note: HOW_TO_RESTORE_MIDGARD_FILES.txt",
+                        "TOR Portal: http://ragnarok-leak-portal.onion/midgard-realmworks [Timer: 72:00:00]",
+                    ],
+                ),
+            },
+            {
+                "type": EvidenceItem.EVIDENCE_TYPE_ATOMIC,
+                "analyst": "Kratos of Sparta",
+                "ts": datetime(2026, 10, 28, 4, 15, 0, tzinfo=dt_timezone.utc),
+                "end_ts": None,
+                "asset": "PERIMETER-FIREWALL-01",
+                "user": "Kratos of Sparta",
+                "attacker_user": False,
+                "summary": "Emergency SOC containment: Core network switches severed, affected VLANs isolated, and C2 IPs blackholed at edge border firewalls.",
+                "notes": "Fimbulwinter ransomware propagation halted. Offline backup recovery and forensics triage initiated under Incident Commander Kratos.",
+                "indicators": "194.26.29.112, 185.196.8.24, 109.236.81.45",
+                "cmd": "panos-cli# set rule 'RANSOMWARE-EMERGENCY-DROP' action drop source any destination [194.26.29.112, 185.196.8.24]",
+                "tactic": "Containment",
+                "technique": "Network Isolation & Null-Route Containment",
+                "log_link": "https://fw.internal.example/logs/emergency-drop-9921",
+                "res_link": "",
+                "qry_link": "",
+                "key": True,
+                "shot": None,
+            },
+        ],
+    }
+
+
 SCENARIO_BUILDERS = {
     "expanse": _get_expanse_spec,
     "star_trek": _get_star_trek_spec,
     "matrix": _get_matrix_spec,
     "star_wars": _get_star_wars_spec,
+    "god_of_war": _get_god_of_war_spec,
 }
 
 
 def create_demo_scenario(scenario_key: str) -> list[Investigation]:
     """
-    Creates one sample scenario (or all 4 when `scenario_key == 'all'`) and returns
+    Creates one sample scenario (or all 5 when `scenario_key == 'all'`) and returns
     the created `Investigation` list. Raises `ValueError` if `scenario_key` is unknown.
     """
     key = (scenario_key or "expanse").strip().lower()
