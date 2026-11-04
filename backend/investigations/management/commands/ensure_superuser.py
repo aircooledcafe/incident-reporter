@@ -2,7 +2,7 @@ import os
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from incidents.models import (
+from investigations.models import (
     UserProfile,
     get_or_create_user_profile,
     sync_user_flags_for_role,

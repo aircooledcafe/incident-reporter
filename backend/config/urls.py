@@ -51,7 +51,7 @@ def serve_django_static(request, path):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('incidents.urls')),
+    path('api/', include('investigations.urls')),
     re_path(r'^artifacts/(?P<path>.*)$', protected_artifact_serve),
     re_path(r'^django-static/(?P<path>.*)$', serve_django_static),
 ]
