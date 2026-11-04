@@ -214,7 +214,7 @@ def assert_can_delete_pcap(user, pcap) -> None:
         )
 
 
-class ProjectAccessPermission(permissions.BasePermission):
+class InvestigationAccessPermission(permissions.BasePermission):
     """
     - demo_scenarios / seed_demo: SUPER_ADMIN only.
     - Safe methods (GET/HEAD/OPTIONS, including timeline & report exports): all authenticated users.
@@ -248,6 +248,38 @@ class ProjectAccessPermission(permissions.BasePermission):
         if not can_write_investigations(user):
             raise PermissionDenied(
                 "Executive accounts are read-only and cannot create or modify investigations."
+            )
+        return True
+
+
+ProjectAccessPermission = InvestigationAccessPermission
+
+
+class CustomerAccessPermission(permissions.BasePermission):
+    """
+    - Safe methods (GET/HEAD/OPTIONS): all authenticated users.
+    - create / update / partial_update: ANALYST, ADMIN, and SUPER_ADMIN.
+    - destroy (DELETE): ADMIN and SUPER_ADMIN only.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated or not user.is_active:
+            return False
+
+        if request.method in permissions.SAFE_METHODS:
+            return bool(get_user_role(user))
+
+        if request.method == 'DELETE':
+            if not is_admin_or_super(user):
+                raise PermissionDenied(
+                    "Only Admin and Super Admin users can delete customers."
+                )
+            return True
+
+        if not can_write_investigations(user):
+            raise PermissionDenied(
+                "Executive accounts are read-only and cannot modify customers."
             )
         return True
 

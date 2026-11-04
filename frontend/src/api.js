@@ -144,36 +144,104 @@ export const api = {
       method: 'DELETE',
     }),
 
-  // Projects
-  listProjects: () => request('/projects/'),
-  getProject: (id) => request(`/projects/${id}/`),
+  // Customers & Directory
+  listCustomers: () => request('/customers/'),
+  getCustomer: (id) => request(`/customers/${id}/`),
+  createCustomer: (data) =>
+    request('/customers/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  updateCustomer: (id, data) =>
+    request(`/customers/${id}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteCustomer: (id) =>
+    request(`/customers/${id}/`, {
+      method: 'DELETE',
+    }),
+
+  // Customer Contacts (Primary, Secondary, Tertiary Escalation)
+  listCustomerContacts: (customerId) =>
+    request(`/customer-contacts/${customerId ? `?customer=${customerId}` : ''}`),
+  addCustomerContact: (data) =>
+    request('/customer-contacts/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  updateCustomerContact: (id, data) =>
+    request(`/customer-contacts/${id}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteCustomerContact: (id) =>
+    request(`/customer-contacts/${id}/`, {
+      method: 'DELETE',
+    }),
+
+  // Investigations (formerly Projects)
+  listInvestigations: () => request('/investigations/'),
+  getInvestigation: (id) => request(`/investigations/${id}/`),
+  createInvestigation: (data) =>
+    request('/investigations/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  updateInvestigation: (id, data) =>
+    request(`/investigations/${id}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteInvestigation: (id) =>
+    request(`/investigations/${id}/`, {
+      method: 'DELETE',
+    }),
+  lockInvestigation: (id) =>
+    request(`/investigations/${id}/lock/`, {
+      method: 'POST',
+    }),
+  unlockInvestigation: (id) =>
+    request(`/investigations/${id}/unlock/`, {
+      method: 'POST',
+    }),
+
+  // Backward compatibility aliases
+  listProjects: () => request('/investigations/'),
+  getProject: (id) => request(`/investigations/${id}/`),
   createProject: (data) =>
-    request('/projects/', {
+    request('/investigations/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }),
   updateProject: (id, data) =>
-    request(`/projects/${id}/`, {
+    request(`/investigations/${id}/`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }),
   deleteProject: (id) =>
-    request(`/projects/${id}/`, {
+    request(`/investigations/${id}/`, {
       method: 'DELETE',
     }),
   lockProject: (id) =>
-    request(`/projects/${id}/lock/`, {
+    request(`/investigations/${id}/lock/`, {
       method: 'POST',
     }),
   unlockProject: (id) =>
-    request(`/projects/${id}/unlock/`, {
+    request(`/investigations/${id}/unlock/`, {
       method: 'POST',
     }),
-  getDemoScenarios: () => request('/projects/demo_scenarios/'),
+  getDemoScenarios: () => request('/investigations/demo_scenarios/'),
   seedDemoProject: (scenario = 'expanse') =>
-    request('/projects/seed_demo/', {
+    request('/investigations/seed_demo/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scenario }),

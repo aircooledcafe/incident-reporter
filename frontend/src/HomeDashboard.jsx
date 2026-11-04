@@ -203,7 +203,7 @@ export default function HomeDashboard({
               No {viewFilter === 'all' ? '' : viewFilter} investigations match the current filter.
             </h6>
             <p className="text-secondary small mb-3">
-              Switch filter toggles above{canEditRole ? ' or start a new incident investigation.' : '.'}
+              Switch filter toggles above{canEditRole ? ' or start a new investigation.' : '.'}
             </p>
             <div className="d-flex flex-wrap justify-content-center gap-2">
               {viewFilter !== 'all' && projects.length > 0 && (
@@ -224,7 +224,7 @@ export default function HomeDashboard({
                   onClick={() => onSeedDemoScenario('all')}
                 >
                   <Sparkles size={14} className="me-1" />
-                  Load All 4 Demo Incidents
+                  Load All 4 Demo Investigations
                 </Button>
               )}
             </div>

@@ -5,7 +5,7 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import slugify
@@ -135,21 +135,103 @@ def _ensure_user_profile_on_save(sender, instance, created, **kwargs):
         sync_user_flags_for_role(instance, default_role)
 
 
+class Customer(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    customer_id = models.CharField(max_length=64, unique=True)  # e.g. "ACME-CORP"
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.customer_id})"
+
+
+class CustomerContact(models.Model):
+    ESCALATION_PRIMARY = 'PRIMARY'
+    ESCALATION_SECONDARY = 'SECONDARY'
+    ESCALATION_TERTIARY = 'TERTIARY'
+    ESCALATION_CHOICES = [
+        (ESCALATION_PRIMARY, 'Primary'),
+        (ESCALATION_SECONDARY, 'Secondary'),
+        (ESCALATION_TERTIARY, 'Tertiary'),
+    ]
+
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name='contacts',
+    )
+    name = models.CharField(max_length=255)
+    role_title = models.CharField(max_length=255, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=64, blank=True, default="")
+    escalation_tier = models.CharField(
+        max_length=16,
+        choices=ESCALATION_CHOICES,
+        default=ESCALATION_PRIMARY,
+    )
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['escalation_tier', 'created_at']
+
+    @property
+    def is_primary_escalation(self) -> bool:
+        return self.escalation_tier == self.ESCALATION_PRIMARY
+
+    def __str__(self):
+        return f"Contact for {self.customer.name}: {self.name} ({self.get_escalation_tier_display()})"
+
+
 def screenshot_upload_path(instance, filename):
-    project = instance.evidence.project
-    folder = project.get_or_create_artifact_folder()
+    inv = instance.evidence.investigation
+    folder = inv.get_or_create_artifact_folder()
     safe_name = os.path.basename(filename)
     return f"{folder}/screenshots/evidence_{instance.evidence.id}_{safe_name}"
 
 
 def pcap_upload_path(instance, filename):
-    project = instance.evidence.project
-    folder = project.get_or_create_artifact_folder()
+    inv = instance.evidence.investigation
+    folder = inv.get_or_create_artifact_folder()
     safe_name = os.path.basename(filename)
     return f"{folder}/pcaps/evidence_{instance.evidence.id}_{safe_name}"
 
 
-class Project(models.Model):
+class InvestigationManager(models.Manager):
+    def create(self, **kwargs):
+        customer = kwargs.get('customer')
+        cust_name = kwargs.pop('customer_name', None)
+        raw_cust_id = kwargs.pop('customer_id', None)
+
+        if not customer:
+            if isinstance(raw_cust_id, Customer):
+                kwargs['customer'] = raw_cust_id
+            elif isinstance(raw_cust_id, int):
+                kwargs['customer_id'] = raw_cust_id
+            else:
+                name = (cust_name or '').strip()
+                code = (raw_cust_id or '').strip()
+                if not name and not code:
+                    name = "Default Organization"
+                    code = "DEFAULT-ORG"
+                else:
+                    name = name or f"Customer {code}"
+                    code = code or f"CUST-{name[:20]}"
+
+                customer, _ = Customer.objects.get_or_create(
+                    name=name,
+                    defaults={'customer_id': code},
+                )
+                kwargs['customer'] = customer
+        return super().create(**kwargs)
+
+
+class Investigation(models.Model):
     STATUS_CHOICES = [
         ('OPEN', 'Open / Triage'),
         ('INVESTIGATING', 'Investigating'),
@@ -157,12 +239,28 @@ class Project(models.Model):
         ('ARCHIVED', 'Archived / Closed'),
     ]
 
-    # Overview fields (none are hard DB requirements)
+    objects = InvestigationManager()
+
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.PROTECT,
+        related_name='investigations',
+    )
     title = models.CharField(max_length=255, blank=True, default="")
-    customer_name = models.CharField(max_length=255, blank=True, default="")
-    customer_id = models.CharField(max_length=128, blank=True, default="")
     ticket_id = models.CharField(max_length=128, blank=True, default="")
     ticket_link = models.CharField(max_length=1024, blank=True, default="")
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='INVESTIGATING')
+
+    # Lead analyst selection from tool users
+    lead_analyst = models.CharField(max_length=150, blank=True, default="")
+    lead_analyst_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='led_investigations',
+    )
+
     summary = models.TextField(blank=True, default="")
     action_plan = models.TextField(blank=True, default="")
     key_customer_contacts = models.TextField(blank=True, default="")
@@ -170,22 +268,23 @@ class Project(models.Model):
     key_users_affected = models.TextField(blank=True, default="")
     key_malicious_indicators = models.TextField(blank=True, default="")
 
-    # Primary inline external research fields (plus support for multiple via ExternalResearch model)
     external_research_link = models.CharField(max_length=1024, blank=True, default="")
     external_research_summary = models.TextField(blank=True, default="")
 
-    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='INVESTIGATING')
-    lead_analyst = models.CharField(max_length=150, blank=True, default="")
     artifact_folder = models.CharField(max_length=255, blank=True, default="")
 
-    # Read-only project lock managed by Admin / Super Admin
+    # Document-style embedded timeline (JSONB in PostgreSQL / JSON in SQLite)
+    # Stored as an array of event objects: [{ id, timestamp, summary, mitre: [...], pcaps: [...], screenshots: [...] }]
+    timeline_events = models.JSONField(default=list, blank=True)
+
+    # Read-only investigation lock managed by Admin / Super Admin
     is_locked = models.BooleanField(default=False)
     locked_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name='locked_projects',
+        related_name='locked_investigations',
     )
     locked_at = models.DateTimeField(null=True, blank=True)
 
@@ -198,17 +297,26 @@ class Project(models.Model):
     def __str__(self):
         return self.title or f"Investigation #{self.pk}"
 
+    @property
+    def customer_name(self) -> str:
+        return self.customer.name if self.customer_id and self.customer else ""
+
+    @property
+    def customer_code(self) -> str:
+        return self.customer.customer_id if self.customer_id and self.customer else ""
+
     def get_or_create_artifact_folder(self) -> str:
         """
         Ensures a dedicated folder exists on disk for storing form-submitted evidence
-        (screenshots and generated reports) during the investigation phase and for archive purposes.
+        (screenshots, pcaps, generated reports) during the investigation phase and for archive purposes.
         """
         if not self.artifact_folder and self.pk:
-            slug = slugify(self.title or self.customer_name or "incident")[:40] or "incident"
-            self.artifact_folder = f"project_{self.pk}_{slug}"
-            Project.objects.filter(pk=self.pk).update(artifact_folder=self.artifact_folder)
+            cust_slug = slugify(self.customer.name if self.customer_id and self.customer else "incident")[:25]
+            title_slug = slugify(self.title or "investigation")[:30]
+            self.artifact_folder = f"investigation_{self.pk}_{cust_slug}_{title_slug}".strip('_')
+            Investigation.objects.filter(pk=self.pk).update(artifact_folder=self.artifact_folder)
 
-        folder_name = self.artifact_folder or "project_unassigned"
+        folder_name = self.artifact_folder or "investigation_unassigned"
         base_path = Path(settings.ARTIFACTS_ROOT) / folder_name
         (base_path / "screenshots").mkdir(parents=True, exist_ok=True)
         (base_path / "pcaps").mkdir(parents=True, exist_ok=True)
@@ -221,11 +329,74 @@ class Project(models.Model):
             return ""
         return str((Path(settings.ARTIFACTS_ROOT) / self.artifact_folder).resolve())
 
+    def get_timeline_evidence(self):
+        return (
+            self.evidence_items.select_related('created_by')
+            .prefetch_related('screenshots__created_by', 'pcaps__created_by')
+            .order_by(
+                models.F('timestamp').asc(nulls_last=True),
+                'created_at',
+            )
+        )
+
+    def sync_timeline_events(self):
+        """
+        Serializes the full evidence timeline into the investigation's embedded JSON column
+        (document model), and updates the archive manifest on disk.
+        """
+        events = [
+            {
+                "id": e.id,
+                "evidence_type": e.evidence_type,
+                "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                "end_timestamp": e.end_timestamp.isoformat() if e.end_timestamp else None,
+                "summary": e.summary,
+                "affected_asset": e.affected_asset,
+                "affected_user": e.affected_user,
+                "user_created_by_attacker": e.user_created_by_attacker,
+                "malicious_hosts_ips": e.malicious_hosts_ips,
+                "commands_run": e.commands_run,
+                "mitre_tactic": e.mitre_tactic,
+                "mitre_technique": e.mitre_technique,
+                "related_log_link": e.related_log_link,
+                "search_result_link": e.search_result_link,
+                "search_query_link": e.search_query_link,
+                "notes": e.notes,
+                "is_key_evidence": e.is_key_evidence,
+                "analyst_name": e.analyst_name,
+                "created_by": e.created_by.username if e.created_by_id and e.created_by else None,
+                "screenshots": [
+                    {
+                        "id": s.id,
+                        "image": s.image.name,
+                        "caption": s.caption,
+                        "analyst_name": s.analyst_name,
+                    }
+                    for s in e.screenshots.all()
+                ],
+                "pcaps": [
+                    {
+                        "id": p.id,
+                        "file": p.file.name,
+                        "description": p.description,
+                        "analyst_name": p.analyst_name,
+                    }
+                    for p in e.pcaps.all()
+                ],
+            }
+            for e in self.get_timeline_evidence()
+        ]
+        self.timeline_events = events
+        if self.pk:
+            Investigation.objects.filter(pk=self.pk).update(timeline_events=events)
+        self.sync_archive_manifest()
+
     def sync_archive_manifest(self):
         """
-        Writes an up-to-date JSON manifest into the project's artifact directory
-        containing only the evidence and metadata submitted via the forms.
+        Writes an up-to-date JSON manifest into the investigation's artifact directory.
         """
+        if not self.pk:
+            return
         folder_name = self.get_or_create_artifact_folder()
         manifest_path = Path(settings.ARTIFACTS_ROOT) / folder_name / "archive_manifest.json"
         research_list = [
@@ -255,42 +426,18 @@ class Project(models.Model):
                 "role_title": c.role_title,
                 "email": c.email,
                 "phone": c.phone,
+                "escalation_tier": c.escalation_tier,
+                "escalation_tier_display": c.get_escalation_tier_display(),
                 "notes": c.notes,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
             }
-            for c in self.customer_contacts.all()
-        ]
-        evidence_list = [
-            {
-                "id": e.id,
-                "evidence_type": e.evidence_type,
-                "timestamp": e.timestamp.isoformat() if e.timestamp else None,
-                "end_timestamp": e.end_timestamp.isoformat() if e.end_timestamp else None,
-                "summary": e.summary,
-                "affected_asset": e.affected_asset,
-                "affected_user": e.affected_user,
-                "user_created_by_attacker": e.user_created_by_attacker,
-                "malicious_hosts_ips": e.malicious_hosts_ips,
-                "commands_run": e.commands_run,
-                "mitre_tactic": e.mitre_tactic,
-                "mitre_technique": e.mitre_technique,
-                "related_log_link": e.related_log_link,
-                "search_result_link": e.search_result_link,
-                "search_query_link": e.search_query_link,
-                "notes": e.notes,
-                "is_key_evidence": e.is_key_evidence,
-                "analyst_name": e.analyst_name,
-                "created_by": e.created_by.username if e.created_by_id and e.created_by else None,
-                "screenshots": [s.image.name for s in e.screenshots.all()],
-                "pcaps": [p.file.name for p in e.pcaps.all()],
-            }
-            for e in self.get_timeline_evidence()
+            for c in (self.customer.contacts.all() if self.customer_id and self.customer else [])
         ]
         manifest_data = {
-            "project_id": self.pk,
+            "investigation_id": self.pk,
             "title": self.title,
-            "customer_name": self.customer_name,
-            "customer_id": self.customer_id,
+            "customer_name": self.customer.name if self.customer_id and self.customer else "",
+            "customer_id": self.customer.customer_id if self.customer_id and self.customer else "",
             "ticket_id": self.ticket_id,
             "ticket_link": self.ticket_link,
             "summary": self.summary,
@@ -311,7 +458,7 @@ class Project(models.Model):
             "lead_analyst": self.lead_analyst,
             "artifact_folder": folder_name,
             "updated_at": timezone.now().isoformat(),
-            "evidence_timeline": evidence_list,
+            "evidence_timeline": self.timeline_events,
         }
         try:
             manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
@@ -319,6 +466,16 @@ class Project(models.Model):
             pass
 
     def save(self, *args, **kwargs):
+        if not self.customer_id:
+            default_cust, _ = Customer.objects.get_or_create(
+                name="Default Organization",
+                defaults={"customer_id": "DEFAULT-ORG"},
+            )
+            self.customer = default_cust
+
+        if self.lead_analyst_user and not self.lead_analyst:
+            self.lead_analyst = get_user_display_name(self.lead_analyst_user)
+
         inline_link = (self.external_research_link or "").strip()
         inline_summary = (self.external_research_summary or "").strip()
         if inline_link or inline_summary:
@@ -327,7 +484,7 @@ class Project(models.Model):
         super().save(*args, **kwargs)
         if inline_link or inline_summary:
             ExternalResearch.objects.create(
-                project=self,
+                investigation=self,
                 link=inline_link,
                 summary=inline_summary,
                 analyst_name=self.lead_analyst or "Analyst",
@@ -345,24 +502,14 @@ class Project(models.Model):
                 shutil.rmtree(target_dir, ignore_errors=True)
         return result
 
-    def get_timeline_evidence(self):
-        """
-        Returns all evidence items ordered chronologically by timestamp (Start Timestamp for Search results,
-        Timestamp for Atomic events). Items without a timestamp are placed at the end ordered by creation time.
-        """
-        return (
-            self.evidence_items.select_related('created_by')
-            .prefetch_related('screenshots__created_by', 'pcaps__created_by')
-            .order_by(
-                models.F('timestamp').asc(nulls_last=True),
-                'created_at',
-            )
-        )
+
+# Project alias for backward compatibility
+Project = Investigation
 
 
 class RelatedIncident(models.Model):
-    project = models.ForeignKey(
-        Project,
+    investigation = models.ForeignKey(
+        Investigation,
         on_delete=models.CASCADE,
         related_name='related_incidents',
     )
@@ -374,33 +521,25 @@ class RelatedIncident(models.Model):
     class Meta:
         ordering = ['created_at']
 
-    def __str__(self):
-        return f"Related Incident for Project #{self.project_id}: {self.title}"
+    @property
+    def project(self):
+        return self.investigation
 
+    @project.setter
+    def project(self, value):
+        self.investigation = value
 
-class CustomerContact(models.Model):
-    project = models.ForeignKey(
-        Project,
-        on_delete=models.CASCADE,
-        related_name='customer_contacts',
-    )
-    name = models.CharField(max_length=255)
-    role_title = models.CharField(max_length=255, blank=True, default="")
-    email = models.CharField(max_length=255, blank=True, default="")
-    phone = models.CharField(max_length=128, blank=True, default="")
-    notes = models.CharField(max_length=512, blank=True, default="")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['created_at']
+    @property
+    def project_id(self):
+        return self.investigation_id
 
     def __str__(self):
-        return f"Contact for Project #{self.project_id}: {self.name}"
+        return f"Related Incident for Investigation #{self.investigation_id}: {self.title}"
 
 
 class ExternalResearch(models.Model):
-    project = models.ForeignKey(
-        Project,
+    investigation = models.ForeignKey(
+        Investigation,
         on_delete=models.CASCADE,
         related_name='external_research_items',
     )
@@ -412,8 +551,20 @@ class ExternalResearch(models.Model):
     class Meta:
         ordering = ['created_at']
 
+    @property
+    def project(self):
+        return self.investigation
+
+    @project.setter
+    def project(self, value):
+        self.investigation = value
+
+    @property
+    def project_id(self):
+        return self.investigation_id
+
     def __str__(self):
-        return f"Research for Project #{self.project_id}: {self.link}"
+        return f"Research for Investigation #{self.investigation_id}: {self.link}"
 
 
 class EvidenceItem(models.Model):
@@ -424,8 +575,8 @@ class EvidenceItem(models.Model):
         (EVIDENCE_TYPE_SEARCH, 'Search Result (Activity Pattern Over Time)'),
     ]
 
-    project = models.ForeignKey(
-        Project,
+    investigation = models.ForeignKey(
+        Investigation,
         on_delete=models.CASCADE,
         related_name='evidence_items',
     )
@@ -443,14 +594,9 @@ class EvidenceItem(models.Model):
         related_name='created_evidence_items',
     )
 
-    # Timestamps:
-    # For ATOMIC events: `timestamp` is the event Timestamp.
-    # For SEARCH events: `timestamp` is the Start Timestamp (used for timeline ordering),
-    # and `end_timestamp` is the End Timestamp.
     timestamp = models.DateTimeField(null=True, blank=True)
     end_timestamp = models.DateTimeField(null=True, blank=True)
 
-    # Core Investigation Fields (none compulsory)
     summary = models.TextField(blank=True, default="")
     affected_asset = models.CharField(max_length=512, blank=True, default="")
     affected_user = models.CharField(max_length=255, blank=True, default="")
@@ -458,16 +604,13 @@ class EvidenceItem(models.Model):
     malicious_hosts_ips = models.TextField(blank=True, default="")
     commands_run = models.TextField(blank=True, default="")
 
-    # Optional MITRE ATT&CK Tactics and Techniques (supports multiple selections separated by '; ')
     mitre_tactic = models.TextField(blank=True, default="")
     mitre_technique = models.TextField(blank=True, default="")
 
-    # Links (Atomic uses related_log_link; Search uses search_result_link and search_query_link)
     related_log_link = models.CharField(max_length=1024, blank=True, default="")
     search_result_link = models.CharField(max_length=1024, blank=True, default="")
     search_query_link = models.CharField(max_length=1024, blank=True, default="")
 
-    # Notes & Report Flag
     notes = models.TextField(blank=True, default="")
     is_key_evidence = models.BooleanField(default=False)
 
@@ -476,6 +619,18 @@ class EvidenceItem(models.Model):
 
     class Meta:
         ordering = ['timestamp', 'created_at']
+
+    @property
+    def project(self):
+        return self.investigation
+
+    @project.setter
+    def project(self, value):
+        self.investigation = value
+
+    @property
+    def project_id(self):
+        return self.investigation_id
 
     def __str__(self):
         return f"[{self.evidence_type}] {self.summary[:50] or 'Evidence #' + str(self.pk)}"
@@ -543,3 +698,25 @@ class EvidencePcap(models.Model):
 
     def __str__(self):
         return f"PCAP for Evidence #{self.evidence_id}"
+
+
+# Signals to keep Investigation.timeline_events in sync with Evidence items
+@receiver(post_save, sender=EvidenceItem)
+@receiver(post_delete, sender=EvidenceItem)
+def _on_evidence_item_changed(sender, instance, **kwargs):
+    if instance.investigation_id:
+        instance.investigation.sync_timeline_events()
+
+
+@receiver(post_save, sender=EvidenceScreenshot)
+@receiver(post_delete, sender=EvidenceScreenshot)
+def _on_screenshot_changed(sender, instance, **kwargs):
+    if instance.evidence_id and instance.evidence and instance.evidence.investigation_id:
+        instance.evidence.investigation.sync_timeline_events()
+
+
+@receiver(post_save, sender=EvidencePcap)
+@receiver(post_delete, sender=EvidencePcap)
+def _on_pcap_changed(sender, instance, **kwargs):
+    if instance.evidence_id and instance.evidence and instance.evidence.investigation_id:
+        instance.evidence.investigation.sync_timeline_events()

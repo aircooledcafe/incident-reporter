@@ -3,10 +3,11 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import (
-    UserProfile,
-    Project,
-    RelatedIncident,
+    Customer,
     CustomerContact,
+    Investigation,
+    UserProfile,
+    RelatedIncident,
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
@@ -68,15 +69,33 @@ class UserProfileAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__email', 'preferred_display_name', 'job_role')
 
 
-@admin.register(Project)
-class ProjectAdmin(admin.ModelAdmin):
+class CustomerContactInline(admin.TabularInline):
+    model = CustomerContact
+    extra = 1
+
+
+@admin.register(Customer)
+class CustomerAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'customer_id', 'created_at', 'updated_at')
+    search_fields = ('name', 'customer_id')
+    inlines = [CustomerContactInline]
+
+
+@admin.register(CustomerContact)
+class CustomerContactAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'customer', 'role_title', 'email', 'phone', 'escalation_tier', 'created_at')
+    list_filter = ('escalation_tier', 'customer')
+    search_fields = ('name', 'role_title', 'email', 'customer__name')
+
+
+@admin.register(Investigation)
+class InvestigationAdmin(admin.ModelAdmin):
     list_display = ('id', 'title', 'customer_name', 'ticket_id', 'status', 'is_locked', 'lead_analyst', 'created_at')
-    list_filter = ('status', 'is_locked')
-    search_fields = ('title', 'customer_name', 'customer_id', 'ticket_id')
+    list_filter = ('status', 'is_locked', 'customer')
+    search_fields = ('title', 'customer__name', 'customer__customer_id', 'ticket_id')
 
 
 admin.site.register(RelatedIncident)
-admin.site.register(CustomerContact)
 admin.site.register(ExternalResearch)
 admin.site.register(EvidenceItem)
 admin.site.register(EvidenceScreenshot)

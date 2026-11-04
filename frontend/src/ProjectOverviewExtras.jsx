@@ -35,6 +35,7 @@ export default function ProjectOverviewExtras({
     role_title: '',
     email: '',
     phone: '',
+    escalation_tier: 'PRIMARY',
     notes: '',
   });
 
@@ -97,13 +98,15 @@ export default function ProjectOverviewExtras({
     try {
       await api.addCustomerContact({
         project: activeProject.id,
+        customer: activeProject.customer || activeProject.customer_detail?.id,
         name: contactForm.name.trim(),
         role_title: contactForm.role_title.trim(),
         email: contactForm.email.trim(),
         phone: contactForm.phone.trim(),
+        escalation_tier: contactForm.escalation_tier || 'PRIMARY',
         notes: contactForm.notes.trim(),
       });
-      setContactForm({ name: '', role_title: '', email: '', phone: '', notes: '' });
+      setContactForm({ name: '', role_title: '', email: '', phone: '', escalation_tier: 'PRIMARY', notes: '' });
       await onProjectMutated(activeProject.id);
       onNotifySuccess('Customer contact added.');
     } catch (err) {
@@ -294,6 +297,7 @@ export default function ProjectOverviewExtras({
             >
               <thead className="small text-secondary text-uppercase">
                 <tr>
+                  <th>Tier</th>
                   <th>Name</th>
                   <th>Role / Title</th>
                   <th>Email</th>
@@ -303,48 +307,60 @@ export default function ProjectOverviewExtras({
                 </tr>
               </thead>
               <tbody className="small">
-                {customerContacts.map((c) => (
-                  <tr key={c.id}>
-                    <td className="fw-semibold text-white">{c.name}</td>
-                    <td>{c.role_title || '—'}</td>
-                    <td className="mono-text">
-                      {c.email ? (
-                        <a
-                          href={`mailto:${c.email}`}
-                          className="text-lb-cyan text-decoration-none"
-                        >
-                          <Mail size={12} className="me-1" />
-                          {c.email}
-                        </a>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="mono-text">
-                      {c.phone ? (
-                        <span>
-                          <Phone size={12} className="me-1 text-secondary" />
-                          {c.phone}
+                {customerContacts.map((c) => {
+                  const isPrimary = c.escalation_tier === 'PRIMARY' || c.is_primary_escalation;
+                  const isSecondary = c.escalation_tier === 'SECONDARY';
+                  const tierVariant = isPrimary ? 'danger' : (isSecondary ? 'warning text-dark' : 'info text-dark');
+                  const tierLabel = c.escalation_tier_display || (isPrimary ? 'Primary' : (isSecondary ? 'Secondary' : 'Tertiary'));
+
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        <span className={`badge bg-${tierVariant}`}>
+                          {tierLabel}
                         </span>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="text-secondary">{c.notes || '—'}</td>
-                    {canModifyActiveProject && (
-                      <td className="text-end">
-                        <Button
-                          variant="outline-secondary"
-                          size="sm"
-                          onClick={() => handleDeleteContact(c.id)}
-                          title="Remove customer contact"
-                        >
-                          <Trash2 size={13} />
-                        </Button>
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td className="fw-semibold text-white">{c.name}</td>
+                      <td>{c.role_title || '—'}</td>
+                      <td className="mono-text">
+                        {c.email ? (
+                          <a
+                            href={`mailto:${c.email}`}
+                            className="text-lb-cyan text-decoration-none"
+                          >
+                            <Mail size={12} className="me-1" />
+                            {c.email}
+                          </a>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="mono-text">
+                        {c.phone ? (
+                          <span>
+                            <Phone size={12} className="me-1 text-secondary" />
+                            {c.phone}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="text-secondary">{c.notes || '—'}</td>
+                      {canModifyActiveProject && (
+                        <td className="text-end">
+                          <Button
+                            variant="outline-secondary"
+                            size="sm"
+                            onClick={() => handleDeleteContact(c.id)}
+                            title="Remove customer contact"
+                          >
+                            <Trash2 size={13} />
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </Table>
           )}
@@ -352,6 +368,17 @@ export default function ProjectOverviewExtras({
           {canModifyActiveProject && (
             <Form onSubmit={handleAddContact}>
               <Row className="g-2">
+                <Col md={2}>
+                  <Form.Select
+                    size="sm"
+                    value={contactForm.escalation_tier}
+                    onChange={(e) => setContactForm({ ...contactForm, escalation_tier: e.target.value })}
+                  >
+                    <option value="PRIMARY">Primary</option>
+                    <option value="SECONDARY">Secondary</option>
+                    <option value="TERTIARY">Tertiary</option>
+                  </Form.Select>
+                </Col>
                 <Col md={3}>
                   <Form.Control
                     size="sm"
@@ -391,13 +418,7 @@ export default function ProjectOverviewExtras({
                     onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
                   />
                 </Col>
-                <Col md={2}>
-                  <Button type="submit" className="btn-lb-primary w-100" size="sm">
-                    <Plus size={14} className="me-1" />
-                    Add Contact
-                  </Button>
-                </Col>
-                <Col md={12}>
+                <Col md={10}>
                   <Form.Control
                     size="sm"
                     type="text"
@@ -405,6 +426,12 @@ export default function ProjectOverviewExtras({
                     value={contactForm.notes}
                     onChange={(e) => setContactForm({ ...contactForm, notes: e.target.value })}
                   />
+                </Col>
+                <Col md={2}>
+                  <Button type="submit" className="btn-lb-primary w-100" size="sm">
+                    <Plus size={14} className="me-1" />
+                    Add Contact
+                  </Button>
                 </Col>
               </Row>
             </Form>

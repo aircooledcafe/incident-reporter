@@ -14,10 +14,12 @@ from django.core.files.base import ContentFile
 from PIL import Image as PilImage, ImageDraw
 
 from .models import (
+    Customer,
     CustomerContact,
     EvidenceItem,
     EvidenceScreenshot,
     ExternalResearch,
+    Investigation,
     Project,
     RelatedIncident,
 )
@@ -89,22 +91,47 @@ def _create_sample_terminal_screenshot(title: str, lines: list[str]) -> bytes:
     return buf.getvalue()
 
 
-def _materialize_scenario(spec: dict) -> Project:
-    """Creates a Project and all child records, screenshots, reports, and archive manifest from `spec`."""
-    project = Project.objects.create(**spec["project"])
+def _materialize_scenario(spec: dict) -> Investigation:
+    """Creates an Investigation and all child records, screenshots, reports, and archive manifest from `spec`."""
+    inv_data = dict(spec["project"])
+    cust_name = inv_data.pop("customer_name", "Acme Corporation")
+    cust_id = inv_data.pop("customer_id", "CUST-DEFAULT")
 
-    for contact in spec.get("contacts", []):
-        CustomerContact.objects.create(project=project, **contact)
+    customer, _ = Customer.objects.get_or_create(
+        name=cust_name,
+        defaults={
+            "customer_id": cust_id,
+            "notes": f"Enterprise client profile for {cust_name}.",
+        },
+    )
+
+    investigation = Investigation.objects.create(customer=customer, **inv_data)
+
+    for idx, contact in enumerate(spec.get("contacts", [])):
+        tier = CustomerContact.ESCALATION_PRIMARY if idx == 0 else (
+            CustomerContact.ESCALATION_SECONDARY if idx == 1 else CustomerContact.ESCALATION_TERTIARY
+        )
+        CustomerContact.objects.get_or_create(
+            customer=customer,
+            name=contact["name"],
+            defaults={
+                "role_title": contact.get("role_title", ""),
+                "email": contact.get("email", ""),
+                "phone": contact.get("phone", ""),
+                "notes": contact.get("notes", ""),
+                "escalation_tier": tier,
+            },
+        )
 
     for rel in spec.get("related_incidents", []):
-        RelatedIncident.objects.create(project=project, **rel)
+        RelatedIncident.objects.create(investigation=investigation, **rel)
 
     for research in spec.get("research", []):
-        ExternalResearch.objects.create(project=project, **research)
+        ExternalResearch.objects.create(investigation=investigation, **research)
 
     for ev_spec in spec.get("events", []):
         ev = EvidenceItem.objects.create(
-            project=project,
+            investigation=investigation,
             evidence_type=ev_spec["type"],
             analyst_name=ev_spec["analyst"],
             timestamp=ev_spec["ts"],
@@ -133,11 +160,12 @@ def _materialize_scenario(spec: dict) -> Project:
             )
             shot.image.save(filename, ContentFile(png_bytes), save=True)
 
-    generate_timeline_csv(project)
-    generate_key_evidence_odt(project)
-    generate_key_evidence_markdown(project)
-    project.sync_archive_manifest()
-    return project
+    generate_timeline_csv(investigation)
+    generate_key_evidence_odt(investigation)
+    generate_key_evidence_markdown(investigation)
+    investigation.sync_timeline_events()
+    investigation.sync_archive_manifest()
+    return investigation
 
 
 def _get_expanse_spec() -> dict:
@@ -1397,10 +1425,10 @@ SCENARIO_BUILDERS = {
 }
 
 
-def create_demo_scenario(scenario_key: str) -> list[Project]:
+def create_demo_scenario(scenario_key: str) -> list[Investigation]:
     """
     Creates one sample scenario (or all 4 when `scenario_key == 'all'`) and returns
-    the created `Project` list. Raises `ValueError` if `scenario_key` is unknown.
+    the created `Investigation` list. Raises `ValueError` if `scenario_key` is unknown.
     """
     key = (scenario_key or "expanse").strip().lower()
     if key == "all":

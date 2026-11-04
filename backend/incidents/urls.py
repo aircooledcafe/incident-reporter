@@ -13,10 +13,12 @@ from .auth_views import (
     UserViewSet,
 )
 from .views import (
+    CustomerViewSet,
+    CustomerContactViewSet,
+    InvestigationViewSet,
     ProjectViewSet,
     EvidenceItemViewSet,
     RelatedIncidentViewSet,
-    CustomerContactViewSet,
     ExternalResearchViewSet,
     EvidenceScreenshotViewSet,
     EvidencePcapViewSet,
@@ -25,10 +27,12 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register(r'customers', CustomerViewSet, basename='customer')
+router.register(r'customer-contacts', CustomerContactViewSet, basename='customer-contact')
+router.register(r'investigations', InvestigationViewSet, basename='investigation')
 router.register(r'projects', ProjectViewSet, basename='project')
 router.register(r'evidence', EvidenceItemViewSet, basename='evidence')
 router.register(r'related-incidents', RelatedIncidentViewSet, basename='related-incident')
-router.register(r'customer-contacts', CustomerContactViewSet, basename='customer-contact')
 router.register(r'external-research', ExternalResearchViewSet, basename='external-research')
 router.register(r'screenshots', EvidenceScreenshotViewSet, basename='screenshot')
 router.register(r'pcaps', EvidencePcapViewSet, basename='pcap')

@@ -7,10 +7,12 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import (
+    Customer,
+    CustomerContact,
+    Investigation,
     UserProfile,
     Project,
     RelatedIncident,
-    CustomerContact,
     ExternalResearch,
     EvidenceItem,
     EvidenceScreenshot,
@@ -336,6 +338,13 @@ class EvidenceScreenshotSerializer(serializers.ModelSerializer):
             return ""
         return os.path.basename(obj.image.name)
 
+    def create(self, validated_data):
+        if 'project' in validated_data and 'investigation' not in validated_data:
+            validated_data['investigation'] = validated_data.pop('project')
+        elif 'project' in validated_data:
+            validated_data.pop('project')
+        return super().create(validated_data)
+
     def get_created_by_username(self, obj) -> str:
         if obj.created_by_id and obj.created_by:
             return obj.created_by.username
@@ -408,6 +417,13 @@ class EvidencePcapSerializer(serializers.ModelSerializer):
             pass
         return 0
 
+    def create(self, validated_data):
+        if 'project' in validated_data and 'investigation' not in validated_data:
+            validated_data['investigation'] = validated_data.pop('project')
+        elif 'project' in validated_data:
+            validated_data.pop('project')
+        return super().create(validated_data)
+
     def get_created_by_username(self, obj) -> str:
         if obj.created_by_id and obj.created_by:
             return obj.created_by.username
@@ -421,6 +437,15 @@ class EvidencePcapSerializer(serializers.ModelSerializer):
 
 
 class EvidenceItemSerializer(serializers.ModelSerializer):
+    investigation = serializers.PrimaryKeyRelatedField(
+        queryset=Investigation.objects.all(),
+        required=False,
+    )
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Investigation.objects.all(),
+        required=False,
+        write_only=True,
+    )
     screenshots = EvidenceScreenshotSerializer(many=True, read_only=True)
     pcaps = EvidencePcapSerializer(many=True, read_only=True)
     evidence_type_display = serializers.CharField(
@@ -434,6 +459,7 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
         model = EvidenceItem
         fields = [
             'id',
+            'investigation',
             'project',
             'evidence_type',
             'evidence_type_display',
@@ -473,6 +499,24 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
             'pcaps',
         ]
 
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'project' in data and 'investigation' not in data:
+            data['investigation'] = data['project']
+        return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['project'] = instance.investigation_id
+        return ret
+
+    def create(self, validated_data):
+        if 'project' in validated_data and 'investigation' not in validated_data:
+            validated_data['investigation'] = validated_data.pop('project')
+        elif 'project' in validated_data:
+            validated_data.pop('project')
+        return super().create(validated_data)
+
     def get_created_by_username(self, obj) -> str:
         if obj.created_by_id and obj.created_by:
             return obj.created_by.username
@@ -486,10 +530,21 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
 
 
 class RelatedIncidentSerializer(serializers.ModelSerializer):
+    investigation = serializers.PrimaryKeyRelatedField(
+        queryset=Investigation.objects.all(),
+        required=False,
+    )
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Investigation.objects.all(),
+        required=False,
+        write_only=True,
+    )
+
     class Meta:
         model = RelatedIncident
         fields = [
             'id',
+            'investigation',
             'project',
             'title',
             'link',
@@ -498,28 +553,111 @@ class RelatedIncidentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at']
 
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'project' in data and 'investigation' not in data:
+            data['investigation'] = data['project']
+        return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['project'] = instance.investigation_id
+        return ret
+
 
 class CustomerContactSerializer(serializers.ModelSerializer):
+    customer = serializers.PrimaryKeyRelatedField(
+        queryset=Customer.objects.all(),
+        required=False,
+    )
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Investigation.objects.all(),
+        required=False,
+        write_only=True,
+    )
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
+    escalation_tier_display = serializers.CharField(source='get_escalation_tier_display', read_only=True)
+    is_primary_escalation = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = CustomerContact
         fields = [
             'id',
+            'customer',
             'project',
+            'customer_name',
             'name',
             'role_title',
             'email',
             'phone',
+            'escalation_tier',
+            'escalation_tier_display',
+            'is_primary_escalation',
             'notes',
             'created_at',
+            'updated_at',
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = [
+            'id',
+            'customer_name',
+            'escalation_tier_display',
+            'is_primary_escalation',
+            'created_at',
+            'updated_at',
+        ]
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'project' in data and 'customer' not in data:
+            proj_id = data.get('project')
+            inv = Investigation.objects.filter(pk=proj_id).first()
+            if inv:
+                data['customer'] = inv.customer_id
+        return super().to_internal_value(data)
+
+    def create(self, validated_data):
+        validated_data.pop('project', None)
+        return super().create(validated_data)
+
+
+class CustomerSerializer(serializers.ModelSerializer):
+    contacts = CustomerContactSerializer(many=True, read_only=True)
+    investigations_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Customer
+        fields = [
+            'id',
+            'name',
+            'customer_id',
+            'notes',
+            'contacts',
+            'investigations_count',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'contacts', 'investigations_count', 'created_at', 'updated_at']
+
+    def get_investigations_count(self, obj) -> int:
+        return obj.investigations.count()
 
 
 class ExternalResearchSerializer(serializers.ModelSerializer):
+    investigation = serializers.PrimaryKeyRelatedField(
+        queryset=Investigation.objects.all(),
+        required=False,
+    )
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Investigation.objects.all(),
+        required=False,
+        write_only=True,
+    )
+
     class Meta:
         model = ExternalResearch
         fields = [
             'id',
+            'investigation',
             'project',
             'link',
             'summary',
@@ -528,10 +666,30 @@ class ExternalResearchSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at']
 
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'project' in data and 'investigation' not in data:
+            data['investigation'] = data['project']
+        return super().to_internal_value(data)
 
-class ProjectSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['project'] = instance.investigation_id
+        return ret
+
+
+class InvestigationSerializer(serializers.ModelSerializer):
+    customer_detail = CustomerSerializer(source='customer', read_only=True)
+    customer_contacts = CustomerContactSerializer(source='customer.contacts', many=True, read_only=True)
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
+    customer_code = serializers.CharField(source='customer.customer_id', read_only=True)
+    customer_id = serializers.SerializerMethodField()
+    customer = serializers.PrimaryKeyRelatedField(
+        queryset=Customer.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     related_incidents = RelatedIncidentSerializer(many=True, read_only=True)
-    customer_contacts = CustomerContactSerializer(many=True, read_only=True)
     external_research_items = ExternalResearchSerializer(many=True, read_only=True)
     timeline_evidence = serializers.SerializerMethodField()
     evidence_count = serializers.SerializerMethodField()
@@ -547,12 +705,15 @@ class ProjectSerializer(serializers.ModelSerializer):
     locked_by_display = serializers.SerializerMethodField()
 
     class Meta:
-        model = Project
+        model = Investigation
         fields = [
             'id',
-            'title',
+            'customer',
+            'customer_detail',
             'customer_name',
+            'customer_code',
             'customer_id',
+            'title',
             'ticket_id',
             'ticket_link',
             'summary',
@@ -573,9 +734,11 @@ class ProjectSerializer(serializers.ModelSerializer):
             'locked_by_display',
             'locked_at',
             'lead_analyst',
+            'lead_analyst_user',
             'artifact_folder',
             'artifact_folder_path',
             'archive_files',
+            'timeline_events',
             'evidence_count',
             'key_evidence_count',
             'analysts_contributing',
@@ -586,6 +749,10 @@ class ProjectSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id',
+            'customer_detail',
+            'customer_name',
+            'customer_code',
+            'customer_contacts',
             'is_locked',
             'locked_by',
             'locked_by_username',
@@ -594,9 +761,15 @@ class ProjectSerializer(serializers.ModelSerializer):
             'artifact_folder',
             'artifact_folder_path',
             'archive_files',
+            'timeline_events',
             'created_at',
             'updated_at',
         ]
+
+    def get_customer_id(self, obj) -> str:
+        if obj.customer_id and obj.customer:
+            return obj.customer.customer_id
+        return ""
 
     def get_locked_by_username(self, obj) -> str:
         if obj.locked_by_id and obj.locked_by:
@@ -648,3 +821,38 @@ class ProjectSerializer(serializers.ModelSerializer):
                     "url": f"{settings.MEDIA_URL}{rel}",
                 })
         return files
+
+    def create(self, validated_data):
+        customer = validated_data.get('customer')
+        initial_data = getattr(self, 'initial_data', {})
+        if not customer:
+            cust_name = (initial_data.get('customer_name') or '').strip()
+            cust_code = (initial_data.get('customer_id') or initial_data.get('customer_code') or '').strip()
+            if not cust_name and not cust_code:
+                customer, _ = Customer.objects.get_or_create(
+                    name="Default Organization",
+                    defaults={"customer_id": "DEFAULT-ORG"},
+                )
+            else:
+                cust_name = cust_name or f"Customer {cust_code}"
+                cust_code = cust_code or f"CUST-{cust_name[:20]}"
+                customer, _ = Customer.objects.get_or_create(
+                    name=cust_name,
+                    defaults={"customer_id": cust_code},
+                )
+            validated_data['customer'] = customer
+
+        lead_user = validated_data.get('lead_analyst_user')
+        if lead_user and not validated_data.get('lead_analyst'):
+            validated_data['lead_analyst'] = get_user_display_name(lead_user)
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        lead_user = validated_data.get('lead_analyst_user')
+        if lead_user and not validated_data.get('lead_analyst'):
+            validated_data['lead_analyst'] = get_user_display_name(lead_user)
+        return super().update(instance, validated_data)
+
+
+ProjectSerializer = InvestigationSerializer

@@ -173,7 +173,7 @@ class IncidentReporterTests(TestCase):
         )
         self.assertEqual(res.status_code, 201)
         data = res.json()
-        self.assertTrue(data["artifact_folder"].startswith("project_"))
+        self.assertTrue(data["artifact_folder"].startswith("investigation_") or data["artifact_folder"].startswith("project_"))
         self.assertEqual(data["lead_analyst"], "James Holden")
 
         project_dir = Path(self.temp_artifacts_dir) / data["artifact_folder"]
@@ -1050,3 +1050,116 @@ class IncidentReporterTests(TestCase):
 
         self.client.force_authenticate(user=self.admin_user)
         self.assertEqual(self.client.delete(f"/api/pcaps/{pcap_b['id']}/").status_code, 204)
+
+    def test_customer_directory_and_investigation_document_model(self):
+        """
+        Tests the Customer directory, contact escalation tiers, investigation linking,
+        lead analyst user selection, embedded timeline document model, and customer protection.
+        """
+        self.client.force_authenticate(user=self.analyst_user)
+
+        # 1. Create a Customer
+        cust_res = self.client.post(
+            "/api/customers/",
+            {
+                "name": "Cyberdyne Systems",
+                "customer_id": "CYBERDYNE-01",
+                "notes": "Autonomous defense contractor.",
+            },
+            format="json",
+        )
+        self.assertEqual(cust_res.status_code, 201)
+        cust_data = cust_res.json()
+        cust_id = cust_data["id"]
+        self.assertEqual(cust_data["name"], "Cyberdyne Systems")
+        self.assertEqual(cust_data["customer_id"], "CYBERDYNE-01")
+
+        # 2. Add Contacts across Primary, Secondary, Tertiary escalation tiers
+        c1 = self.client.post(
+            "/api/customer-contacts/",
+            {
+                "customer": cust_id,
+                "name": "Miles Dyson",
+                "role_title": "Director of Special Projects",
+                "email": "dyson@cyberdyne.example",
+                "phone": "+1-555-0101",
+                "escalation_tier": "PRIMARY",
+                "notes": "24/7 Primary Emergency Lead",
+            },
+            format="json",
+        )
+        self.assertEqual(c1.status_code, 201)
+        self.assertTrue(c1.json()["is_primary_escalation"])
+        self.assertEqual(c1.json()["escalation_tier_display"], "Primary")
+
+        c2 = self.client.post(
+            "/api/customer-contacts/",
+            {
+                "customer": cust_id,
+                "name": "Sarah Connor",
+                "role_title": "Security Lead",
+                "email": "sconnor@cyberdyne.example",
+                "phone": "+1-555-0102",
+                "escalation_tier": "SECONDARY",
+            },
+            format="json",
+        )
+        self.assertEqual(c2.status_code, 201)
+        self.assertFalse(c2.json()["is_primary_escalation"])
+
+        # 3. Create an Investigation selecting the Customer & Lead Analyst user
+        inv_res = self.client.post(
+            "/api/investigations/",
+            {
+                "customer": cust_id,
+                "title": "Neural Net Prototype Anomalous Outbound Traffic",
+                "ticket_id": "CYBER-9921",
+                "lead_analyst_user": self.analyst_user.id,
+                "summary": "High-volume encrypted egress to unlisted cloud node.",
+            },
+            format="json",
+        )
+        self.assertEqual(inv_res.status_code, 201)
+        inv_data = inv_res.json()
+        inv_id = inv_data["id"]
+        self.assertEqual(inv_data["customer_name"], "Cyberdyne Systems")
+        self.assertEqual(inv_data["customer_code"], "CYBERDYNE-01")
+        self.assertEqual(inv_data["lead_analyst"], "James Holden")
+        self.assertEqual(len(inv_data["customer_contacts"]), 2)
+        self.assertEqual(inv_data["timeline_events"], [])
+
+        # 4. Add an Evidence Item and verify embedded document timeline_events is automatically updated
+        ev_res = self.client.post(
+            "/api/evidence/",
+            {
+                "investigation": inv_id,
+                "evidence_type": "ATOMIC",
+                "summary": "100GB exfiltration from R&D server",
+                "affected_asset": "SRV-NEURAL-01 (10.0.1.10)",
+                "affected_user": "svc_neural_mesh",
+                "mitre_tactic": "Exfiltration (TA0010)",
+                "mitre_technique": "T1048 - Exfiltration Over Alternative Protocol",
+            },
+            format="json",
+        )
+        self.assertEqual(ev_res.status_code, 201)
+
+        # Refresh investigation detail and verify document timeline_events
+        inv_detail = self.client.get(f"/api/investigations/{inv_id}/").json()
+        self.assertEqual(len(inv_detail["timeline_events"]), 1)
+        doc_event = inv_detail["timeline_events"][0]
+        self.assertEqual(doc_event["summary"], "100GB exfiltration from R&D server")
+        self.assertEqual(doc_event["affected_asset"], "SRV-NEURAL-01 (10.0.1.10)")
+
+        # 5. Customer deletion protection: Cannot delete customer while an active investigation exists
+        self.client.force_authenticate(user=self.admin_user)
+        del_cust_blocked = self.client.delete(f"/api/customers/{cust_id}/")
+        self.assertEqual(del_cust_blocked.status_code, 403)
+        self.assertIn("associated investigation", del_cust_blocked.json()["detail"])
+
+        # 6. Delete investigation, then deleting the customer succeeds (204)
+        del_inv = self.client.delete(f"/api/investigations/{inv_id}/")
+        self.assertEqual(del_inv.status_code, 204)
+
+        del_cust_ok = self.client.delete(f"/api/customers/{cust_id}/")
+        self.assertEqual(del_cust_ok.status_code, 204)

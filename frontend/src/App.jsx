@@ -40,10 +40,12 @@ import {
   Image as ImageIcon,
   Network,
   Download,
+  Building2,
 } from 'lucide-react';
 import { api } from './api';
 import HomeDashboard from './HomeDashboard';
 import AccountProfileModal from './AccountProfileModal';
+import CustomerManagementModal from './CustomerManagementModal';
 import ProjectOverviewExtras from './ProjectOverviewExtras';
 import EvidenceDetailModal from './EvidenceDetailModal';
 import { MitreTacticsSelect, MitreTechniquesSelect } from './MitreMultiSelect';
@@ -92,8 +94,9 @@ const DEFAULT_DEMO_SCENARIOS = [
   },
 ];
 
-const EMPTY_PROJECT_FORM = {
+const EMPTY_INVESTIGATION_FORM = {
   title: '',
+  customer: '',
   customer_name: '',
   customer_id: '',
   ticket_id: '',
@@ -107,8 +110,11 @@ const EMPTY_PROJECT_FORM = {
   external_research_link: '',
   external_research_summary: '',
   status: 'INVESTIGATING',
+  lead_analyst_user: '',
   lead_analyst: '',
 };
+
+const EMPTY_PROJECT_FORM = EMPTY_INVESTIGATION_FORM;
 
 const EMPTY_EVIDENCE_FORM = {
   evidence_type: 'ATOMIC',
@@ -250,6 +256,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'timeline' | 'reports'
   const [analystDirectory, setAnalystDirectory] = useState([]);
   const [demoScenarios, setDemoScenarios] = useState(DEFAULT_DEMO_SCENARIOS);
+  const [customers, setCustomers] = useState([]);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
 
   // Sidebar Archived/Closed & Locked filters (both hidden by default)
   const [showArchivedSidebar, setShowArchivedSidebar] = useState(false);
@@ -380,9 +388,19 @@ export default function App() {
     }
   });
 
+  const loadCustomers = useEventCallback(async () => {
+    try {
+      const data = await api.listCustomers();
+      setCustomers(Array.isArray(data) ? data : data.results || []);
+    } catch {
+      // Ignore background load failures
+    }
+  });
+
   const loadProjects = useEventCallback(async (selectId = null, clearSelection = false) => {
     try {
       setLoading(true);
+      loadCustomers();
       const list = await api.listProjects();
       setProjects(list);
       const openUnlocked = list.filter((p) => p.status !== 'ARCHIVED' && !p.is_locked);
@@ -449,6 +467,7 @@ export default function App() {
   useEffect(() => {
     if (authUserId) {
       loadProjects(null, true);
+      loadCustomers();
       loadAnalystDirectory();
       loadDemoScenarios();
     } else {
@@ -667,9 +686,9 @@ export default function App() {
       const primaryId = result?.primary?.id || result?.id;
       await loadProjects(primaryId);
       if (scenarioKey === 'all') {
-        notifySuccess(`Loaded all ${result?.count || 4} themed sample incidents.`);
+        notifySuccess(`Loaded all ${result?.count || 4} themed sample investigations.`);
       } else {
-        notifySuccess(`Sample incident loaded: "${result?.title || scenarioKey}".`);
+        notifySuccess(`Sample investigation loaded: "${result?.title || scenarioKey}".`);
         setMainView('investigations');
       }
     } catch (err) {
@@ -737,9 +756,15 @@ export default function App() {
 
   const openNewProjectModal = () => {
     setEditingProject(false);
+    const defaultCust = customers[0];
+    const defaultLead = analystDirectory.find((a) => a.id === authUser?.id) || analystDirectory[0];
     setProjectForm({
       ...EMPTY_PROJECT_FORM,
-      lead_analyst: currentAnalystName,
+      customer: defaultCust ? defaultCust.id : '',
+      customer_name: defaultCust ? defaultCust.name : '',
+      customer_id: defaultCust ? defaultCust.customer_id : '',
+      lead_analyst_user: defaultLead ? defaultLead.id : '',
+      lead_analyst: defaultLead ? (defaultLead.display_name || defaultLead.username) : currentAnalystName,
     });
     setShowProjectModal(true);
   };
@@ -749,8 +774,9 @@ export default function App() {
     setEditingProject(true);
     setProjectForm({
       title: activeProject.title || '',
+      customer: activeProject.customer || activeProject.customer_detail?.id || '',
       customer_name: activeProject.customer_name || '',
-      customer_id: activeProject.customer_id || '',
+      customer_id: activeProject.customer_code || activeProject.customer_id || '',
       ticket_id: activeProject.ticket_id || '',
       ticket_link: activeProject.ticket_link || '',
       summary: activeProject.summary || '',
@@ -762,6 +788,7 @@ export default function App() {
       external_research_link: '',
       external_research_summary: '',
       status: activeProject.status || 'INVESTIGATING',
+      lead_analyst_user: activeProject.lead_analyst_user || '',
       lead_analyst: activeProject.lead_analyst || currentAnalystName,
     });
     setShowProjectModal(true);
@@ -769,13 +796,17 @@ export default function App() {
 
   const executeSaveProject = async () => {
     try {
+      const payload = { ...projectForm };
+      if (!payload.customer && customers.length > 0) {
+        payload.customer = customers[0].id;
+      }
       if (editingProject && activeProject) {
-        const updated = await api.updateProject(activeProject.id, projectForm);
+        const updated = await api.updateProject(activeProject.id, payload);
         setActiveProject(updated);
         await loadProjects(updated.id);
         notifySuccess('Investigation overview updated.');
       } else {
-        const created = await api.createProject(projectForm);
+        const created = await api.createProject(payload);
         await loadProjects(created.id);
         setMainView('investigations');
         notifySuccess(`Created investigation "${created.title || '#' + created.id}".`);
@@ -1371,6 +1402,14 @@ export default function App() {
                 <FolderOpen size={14} className="me-1" />
                 Investigations
               </Button>
+              <Button
+                size="sm"
+                variant="outline-secondary"
+                onClick={() => setShowCustomerModal(true)}
+              >
+                <Building2 size={14} className="me-1" />
+                Customers
+              </Button>
               {canManageUsers && (
                 <Button
                   size="sm"
@@ -1400,7 +1439,7 @@ export default function App() {
           </div>
 
           <div className="d-flex align-items-center flex-wrap gap-2 ms-auto mt-2 mt-lg-0">
-            {/* Super Admin Only: Load Sample Incident Dropdown (4 Themed Scenarios) */}
+            {/* Super Admin Only: Load Sample Investigation Dropdown (4 Themed Scenarios) */}
             {canSeedDemo && (
               <div className="position-relative" ref={demoDropdownRef}>
                 <Button
@@ -1409,7 +1448,7 @@ export default function App() {
                   onClick={() => setShowDemoDropdown((prev) => !prev)}
                 >
                   <Sparkles size={14} />
-                  <span>Load Sample Incident</span>
+                  <span>Load Sample Investigation</span>
                   <ChevronDown size={13} />
                 </Button>
 
@@ -1440,7 +1479,7 @@ export default function App() {
                         onClick={() => handleSeedDemo('all')}
                       >
                         <Sparkles size={14} />
-                        <span>Load All 4 Sample Incidents</span>
+                        <span>Load All 4 Sample Investigations</span>
                       </button>
                     </div>
                   </div>
@@ -1849,7 +1888,7 @@ export default function App() {
                       )}
                       {canSeedDemo && (
                         <Button className="btn-lb-cyan" onClick={() => handleSeedDemo('expanse')}>
-                          Load Sample Incident
+                          Load Sample Investigation
                         </Button>
                       )}
                     </div>
@@ -2988,27 +3027,77 @@ export default function App() {
 
                 <Col md={6}>
                   <Form.Group>
-                    <Form.Label className="small text-secondary mb-1">Customer Name</Form.Label>
-                    <Form.Control
-                      type="text"
-                      value={projectForm.customer_name}
-                      onChange={(e) =>
-                        setProjectForm({ ...projectForm, customer_name: e.target.value })
-                      }
-                    />
+                    <div className="d-flex justify-content-between align-items-center mb-1">
+                      <Form.Label className="small text-secondary mb-0">Customer</Form.Label>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="p-0 text-lb-cyan small text-decoration-none"
+                        onClick={() => setShowCustomerModal(true)}
+                      >
+                        + Manage Customers
+                      </Button>
+                    </div>
+                    {customers && customers.length > 0 ? (
+                      <Form.Select
+                        value={projectForm.customer || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const cust = customers.find((c) => String(c.id) === String(val));
+                          setProjectForm({
+                            ...projectForm,
+                            customer: val ? parseInt(val, 10) : '',
+                            customer_name: cust ? cust.name : '',
+                            customer_id: cust ? cust.customer_id : '',
+                          });
+                        }}
+                      >
+                        <option value="">Select a customer organization...</option>
+                        {customers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.customer_id})
+                          </option>
+                        ))}
+                      </Form.Select>
+                    ) : (
+                      <Form.Control
+                        type="text"
+                        placeholder="Customer Name"
+                        value={projectForm.customer_name}
+                        onChange={(e) =>
+                          setProjectForm({ ...projectForm, customer_name: e.target.value })
+                        }
+                      />
+                    )}
+                    {projectForm.customer_id && (
+                      <div className="mt-1 small text-muted mono-text">
+                        Customer Code: <span className="text-lb-cyan">{projectForm.customer_id}</span>
+                      </div>
+                    )}
                   </Form.Group>
                 </Col>
                 <Col md={6}>
                   <Form.Group>
-                    <Form.Label className="small text-secondary mb-1">Customer ID</Form.Label>
-                    <Form.Control
-                      type="text"
-                      className="mono-text"
-                      value={projectForm.customer_id}
-                      onChange={(e) =>
-                        setProjectForm({ ...projectForm, customer_id: e.target.value })
-                      }
-                    />
+                    <Form.Label className="small text-secondary mb-1">Lead Analyst</Form.Label>
+                    <Form.Select
+                      value={projectForm.lead_analyst_user || ''}
+                      onChange={(e) => {
+                        const uid = e.target.value ? parseInt(e.target.value, 10) : '';
+                        const userMatch = analystDirectory.find((a) => a.id === uid);
+                        setProjectForm({
+                          ...projectForm,
+                          lead_analyst_user: uid,
+                          lead_analyst: userMatch ? (userMatch.display_name || userMatch.username) : '',
+                        });
+                      }}
+                    >
+                      <option value="">Select Lead Analyst (or leave unassigned)...</option>
+                      {analystDirectory.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.display_name || a.username} ({a.role_display || a.role})
+                        </option>
+                      ))}
+                    </Form.Select>
                   </Form.Group>
                 </Col>
 
@@ -4125,6 +4214,20 @@ export default function App() {
         onProfileUpdated={handleProfileUpdated}
         onNotifySuccess={notifySuccess}
         onApiError={handleApiError}
+      />
+      {/* Customer Directory & Escalation Contacts Modal */}
+      <CustomerManagementModal
+        show={showCustomerModal}
+        onHide={() => setShowCustomerModal(false)}
+        canManage={canEditRole}
+        onNotifySuccess={notifySuccess}
+        onNotifyError={(msg) => handleApiError(null, msg)}
+        onCustomerUpdated={async () => {
+          await loadCustomers();
+          if (activeProject) {
+            await handleSelectProject(activeProject.id);
+          }
+        }}
       />
     </div>
   );

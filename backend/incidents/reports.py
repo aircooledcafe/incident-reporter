@@ -48,7 +48,10 @@ def build_investigation_report_filename(project, ext: str) -> str:
     if timezone.is_aware(created_dt):
         created_dt = created_dt.astimezone(dt_timezone.utc)
     date_part = created_dt.strftime("%Y-%m-%d")
-    customer_part = _sanitize_filename_segment(getattr(project, "customer_id", ""))
+    cust_code = getattr(project, "customer_code", "")
+    if not cust_code and hasattr(project, "customer") and project.customer:
+        cust_code = getattr(project.customer, "customer_id", "")
+    customer_part = _sanitize_filename_segment(cust_code)
     ticket_part = _sanitize_filename_segment(getattr(project, "ticket_id", ""))
     investigation_id_part = str(project.pk or "0")
 
@@ -303,7 +306,7 @@ def generate_key_evidence_odt(project) -> tuple[bytes, Path]:
     Report Two (OpenDocument Text .odt):
     Structure:
       TITLE
-      Summary of incident.
+      Summary of investigation.
       Key Evidence timeline (each item starts directly with TIMESTAMP, ASSET, USER:)
         Analyst notes.
         Key malicious indicators (defanged)
@@ -721,4 +724,4 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     zip_path = reports_dir / zip_filename
     zip_path.write_bytes(zip_bytes)
 
-    return md_content, report_path, zip_bytes
+    return md_content, report_path, zip_bytes, zip_path
