@@ -137,6 +137,7 @@ sudo mkdir -p /mnt/incident-data/postgres /mnt/incident-data/artifacts
 # PostgreSQL runs under UID 999 inside postgres:16-alpine
 sudo chown -R 999:999 /mnt/incident-data/postgres
 sudo chmod 700 /mnt/incident-data/postgres
+# (PostgreSQL cluster files are automatically created in /mnt/incident-data/postgres/pgdata)
 
 # Allow Docker container write permissions for artifacts
 sudo chown -R ubuntu:ubuntu /mnt/incident-data/artifacts
