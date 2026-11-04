@@ -297,11 +297,11 @@ erDiagram
 
 ### Storage & Relational Behavior
 - **Built-In Auth + `UserProfile`**: Uses Django's native `auth_user` table with a `1:1` `UserProfile` table storing the application role (`SUPER_ADMIN`, `ADMIN`, `ANALYST`, `EXECUTIVE`). `is_staff` and `is_superuser` are automatically synchronized so **only** `SUPER_ADMIN` can access `/admin/` to make direct database changes.
-- **Database-Backed Sessions & Tokens**: User login sessions (`django_session` via `SESSION_ENGINE = 'django.contrib.sessions.backends.db'`) and SOC ingestion API tokens (`authtoken_token`) live inside the SQLite database rather than container memory.
+- **Database-Backed Sessions & Tokens**: User login sessions (`django_session` via `SESSION_ENGINE = 'django.contrib.sessions.backends.db'`) and SOC ingestion API tokens (`authtoken_token`) live inside PostgreSQL rather than container memory.
 - **Cascading Cleanup & Disk Synchronization**:
-  - `ExternalResearch` and `EvidenceItem` cascade on `Project` deletion; `EvidenceScreenshot` cascades on `EvidenceItem` deletion and removes its image file from disk.
-  - Deleting an unlocked `Project` (Admin / Super Admin only) also cleans up its `artifacts/<project_folder>/` directory.
-  - Saving a `Project`, `EvidenceItem`, `ExternalResearch`, or `EvidenceScreenshot` writes an updated `archive_manifest.json` snapshot into `artifacts/<project_folder>/`.
+  - `ExternalResearch` and `EvidenceItem` cascade on `Investigation` deletion; `EvidenceScreenshot` cascades on `EvidenceItem` deletion and removes its image file from disk.
+  - Deleting an unlocked `Investigation` (Admin / Super Admin only) also cleans up its `artifacts/<investigation_folder>/` directory.
+  - Saving an `Investigation`, `EvidenceItem`, `ExternalResearch`, or `EvidenceScreenshot` writes an updated `archive_manifest.json` snapshot into `artifacts/<investigation_folder>/`.
 
 ---
 
@@ -315,8 +315,11 @@ Before starting the application (with Docker Compose or locally), copy `.env.exa
 | `DJANGO_DEBUG` | No | `False` | Enables Django debug mode (`True` or `False`). Keep `False` in production/Docker. |
 | `DJANGO_ALLOWED_HOSTS` | No | `*` | Comma-separated list of allowed hostnames/IPs (e.g., `localhost,127.0.0.1,192.168.1.50`). |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | No | *(Empty)* | Comma-separated trusted origins when accessed via reverse proxy / HTTPS (e.g., `https://ir.corp.example`). |
-| `HOST_DB_DIR` | No | `./data/db` | External/host directory mounted to `/data/db` in Docker (stores `db.sqlite3`, WAL/journal files, `auth_user`, `UserProfile`, `django_session`, `authtoken_token`, and all project/evidence tables). |
-| `HOST_ARTIFACTS_DIR` | No | `./artifacts` | External/host directory mounted to `/data/artifacts` in Docker (stores all project folders, uploaded screenshots, manifests, and generated `.csv`/`.odt`/`.md`/`.zip` reports). |
+| `POSTGRES_DB` | No | `incident_reporter` | PostgreSQL database name. |
+| `POSTGRES_USER` | No | `soc_admin` | PostgreSQL database username. |
+| `POSTGRES_PASSWORD` | No | `soc_secure_pass` | PostgreSQL database password. |
+| `POSTGRES_PORT` | No | `5432` | PostgreSQL port. |
+| `HOST_ARTIFACTS_DIR` | No | `./artifacts` | External/host directory mounted to `/data/artifacts` in Docker (stores all investigation folders, uploaded screenshots, manifests, and generated `.csv`/`.odt`/`.md`/`.zip` reports). |
 | `DJANGO_SUPERUSER_USERNAME` | No | *(Empty)* | Optional initial Super Admin username created on startup by `ensure_superuser`. |
 | `DJANGO_SUPERUSER_PASSWORD` | No | *(Empty)* | Optional initial Super Admin password created on startup by `ensure_superuser`. |
 | `DJANGO_SUPERUSER_EMAIL` | No | *(Empty)* | Optional initial Super Admin email address. |
@@ -339,22 +342,22 @@ p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={se
 
 ## Docker Deployment & Non-Ephemeral External Storage
 
-The Docker Compose stack runs two services:
-- **`backend`**: Python `3.12-slim` + Django `5.1.14` + Gunicorn (`backend/Dockerfile`), automatically running migrations and `ensure_superuser` via `backend/entrypoint.sh`.
+The Docker Compose stack runs three services:
+- **`postgres`**: PostgreSQL `16-alpine` database service with automated healthchecks and managed persistence (`postgres_data` Docker volume).
+- **`backend`**: Python `3.12-slim` + Django `5.1.14` + Gunicorn (`backend/Dockerfile`), automatically running migrations and `ensure_superuser` via `backend/entrypoint.sh` after awaiting PostgreSQL readiness.
 - **`frontend`**: Multi-stage Node `22-alpine` build + Nginx `1.27-alpine` (`frontend/Dockerfile` & `frontend/nginx.conf`), serving the compiled React SPA and reverse-proxying `/api/`, `/artifacts/`, `/admin/`, and `/django-static/` to `backend` while preserving `Host` and scheme headers for CSRF/session cookies.
 
 ### Externalizing All Persistent State (Zero Ephemeral User Data)
 
-All application and user-created state lives outside the containers via configurable volume mounts:
+All application and user-created state lives outside the containers:
 
-| External Host / NAS Path (`.env`) | Container Mount | Persisted Data |
+| Mount / Volume | Container Mount | Persisted Data |
 | :--- | :--- | :--- |
-| `HOST_DB_DIR` *(default `./data/db`)* | `/data/db` | `db.sqlite3` (and SQLite journal/WAL files): **`auth_user` table**, **`UserProfile` roles/display names/pronouns**, **`django_session` login sessions**, **`authtoken_token` API keys**, **`django_admin_log`**, **`Project`**, **`RelatedIncident`**, **`CustomerContact`**, **`ExternalResearch`**, **`EvidenceItem`**, and **`EvidenceScreenshot`** metadata. |
-| `HOST_ARTIFACTS_DIR` *(default `./artifacts`)* | `/data/artifacts` | User profile **`avatars/`**, per-investigation folders (`project_<id>_<slug>/`), uploaded **`screenshots/`**, generated **`reports/`** (`.csv`, `.odt`, `.md`, `.zip`), and **`archive_manifest.json`**. |
+| `postgres_data` *(Docker volume)* | `/var/lib/postgresql/data` | PostgreSQL tables: **`Customer`**, **`CustomerContact`**, **`Investigation`**, **`auth_user`**, **`UserProfile`**, **`django_session`**, **`authtoken_token`**, **`RelatedIncident`**, **`ExternalResearch`**, and **`EvidenceItem`** metadata. |
+| `HOST_ARTIFACTS_DIR` *(default `./artifacts`)* | `/data/artifacts` | User profile **`avatars/`**, per-investigation folders, uploaded **`screenshots/`**, PCAPs, generated **`reports/`** (`.csv`, `.odt`, `.md`, `.zip`), and **`archive_manifest.json`**. |
 
-To store data on an external disk, NAS/NFS share, or SAN mount (e.g., `/mnt/soc-storage`), set in `.env`:
+To store artifacts on an external disk, NAS/NFS share, or SAN mount (e.g., `/mnt/soc-storage`), set in `.env`:
 ```ini
-HOST_DB_DIR=/mnt/soc-storage/incident-reporter/db
 HOST_ARTIFACTS_DIR=/mnt/soc-storage/incident-reporter/artifacts
 ```
 
@@ -364,7 +367,7 @@ git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
 cd incident-reporter
 
 cp .env.example .env
-# Set DJANGO_SECRET_KEY (and optional HOST_DB_DIR, HOST_ARTIFACTS_DIR, DJANGO_SUPERUSER_*)
+# Set DJANGO_SECRET_KEY (and optional POSTGRES_PASSWORD, HOST_ARTIFACTS_DIR, DJANGO_SUPERUSER_*)
 
 docker compose up -d --build
 ```
@@ -372,12 +375,25 @@ docker compose up -d --build
 - **Super Admin Django DB Interface**: `http://<SERVER_IP>:5173/admin/` *(restricted strictly to `SUPER_ADMIN` accounts)*
 - **Direct Backend API**: `http://<SERVER_IP>:8000/api/`
 
-### 2. Updating Containers Without Data Loss
+### 2. Redeploying as a Clean Brand New Instance
+To completely wipe previous data and start fresh as a brand new instance:
+```bash
+# 1. Stop existing containers and remove the old database volume
+docker compose down -v
+
+# 2. (Optional) Clear old investigation artifacts if starting completely fresh
+rm -rf ./artifacts/* ./data/db/*
+
+# 3. Rebuild and launch the new PostgreSQL stack
+docker compose up -d --build
+```
+
+### 3. Updating Containers Without Data Loss
 ```bash
 git pull
 docker compose up -d --build
 ```
-Rebuilding replaces only the stateless container images and automatically applies any new Django schema migrations against your external `db.sqlite3`.
+Rebuilding replaces only the stateless container images and automatically applies any new Django schema migrations against PostgreSQL.
 
 ---
 

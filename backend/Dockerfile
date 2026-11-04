@@ -2,7 +2,6 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DJANGO_DB_PATH=/data/db/db.sqlite3 \
     DJANGO_ARTIFACTS_ROOT=/data/artifacts \
     DJANGO_STATIC_ROOT=/app/backend/staticfiles
 
@@ -20,14 +19,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app/backend/
 RUN sed -i 's/\r$//' /app/backend/entrypoint.sh && \
     chmod +x /app/backend/entrypoint.sh && \
-    mkdir -p /data/db /data/artifacts /app/backend/staticfiles && \
+    mkdir -p /data/artifacts /app/backend/staticfiles && \
     DJANGO_SECRET_KEY="docker-build-collectstatic-placeholder" \
-    DJANGO_DB_PATH="/tmp/build_collectstatic.sqlite3" \
     DJANGO_ARTIFACTS_ROOT="/tmp/build_artifacts" \
     python manage.py collectstatic --noinput && \
-    rm -rf /tmp/build_collectstatic.sqlite3 /tmp/build_artifacts
+    rm -rf /tmp/build_artifacts
 
-VOLUME ["/data/db", "/data/artifacts"]
+VOLUME ["/data/artifacts"]
 
 EXPOSE 8000
 

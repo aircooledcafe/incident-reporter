@@ -7,11 +7,50 @@ if [ -z "${DJANGO_SECRET_KEY}" ]; then
     exit 1
 fi
 
-# Ensure external/mapped volume directories exist for database (users, sessions, projects) and artifacts
-mkdir -p "$(dirname "${DJANGO_DB_PATH:-/data/db/db.sqlite3}")"
+# Ensure external/mapped volume directory exists for investigation artifacts
 mkdir -p "${DJANGO_ARTIFACTS_ROOT:-/data/artifacts}"
 
-echo "[Backend] Running database migrations on ${DJANGO_DB_PATH:-/data/db/db.sqlite3}..."
+if [ -n "${POSTGRES_DB}" ]; then
+    echo "[Backend] Waiting for PostgreSQL database at ${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB}..."
+    python - <<'EOF'
+import sys
+import time
+import os
+import psycopg
+
+host = os.environ.get('POSTGRES_HOST', 'postgres')
+port = os.environ.get('POSTGRES_PORT', '5432')
+dbname = os.environ.get('POSTGRES_DB')
+user = os.environ.get('POSTGRES_USER', 'postgres')
+password = os.environ.get('POSTGRES_PASSWORD', '')
+
+max_tries = 30
+for i in range(1, max_tries + 1):
+    try:
+        conn = psycopg.connect(
+            host=host,
+            port=port,
+            dbname=dbname,
+            user=user,
+            password=password,
+            connect_timeout=3
+        )
+        conn.close()
+        print(f"[Backend] Successfully connected to PostgreSQL on attempt {i}.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"[Backend] PostgreSQL not ready yet ({e}). Retrying in 1s ({i}/{max_tries})...")
+        time.sleep(1)
+
+print("[Backend] ERROR: Timed out waiting for PostgreSQL.", file=sys.stderr)
+sys.exit(1)
+EOF
+    echo "[Backend] Running database migrations on PostgreSQL (${POSTGRES_DB})..."
+else
+    mkdir -p "$(dirname "${DJANGO_DB_PATH:-/data/db/db.sqlite3}")"
+    echo "[Backend] Running database migrations on SQLite (${DJANGO_DB_PATH:-/data/db/db.sqlite3})..."
+fi
+
 python manage.py migrate --noinput
 
 echo "[Backend] Checking optional initial Super Admin bootstrap..."
