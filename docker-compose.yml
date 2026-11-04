@@ -8,7 +8,8 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:-soc_admin}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-soc_secure_pass}"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Dedicated/separate storage volume for PostgreSQL data (e.g. attached AWS EBS volume or local host path)
+      - "${HOST_PG_DIR:-./data/postgres}:/var/lib/postgresql/data"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-soc_admin} -d $${POSTGRES_DB:-incident_reporter}"]
       interval: 5s
@@ -41,7 +42,7 @@ services:
       DJANGO_SUPERUSER_EMAIL: "${DJANGO_SUPERUSER_EMAIL:-}"
       GUNICORN_WORKERS: "${GUNICORN_WORKERS:-3}"
     volumes:
-      # External/host persistence for investigation folders, uploaded screenshots, manifests, and exported reports
+      # Dedicated/separate storage volume for investigation folders, screenshots, PCAPs, and reports
       - "${HOST_ARTIFACTS_DIR:-./artifacts}:/data/artifacts"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -69,6 +70,3 @@ services:
         condition: service_healthy
     ports:
       - "${APP_PORT:-5173}:80"
-
-volumes:
-  postgres_data:

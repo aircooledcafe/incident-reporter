@@ -30,6 +30,8 @@ yarn-error.log*
 # Mapped Docker Database & Investigation Artifacts (keep folders, ignore local data)
 data/db/*
 !data/db/.gitkeep
+data/postgres/*
+!data/postgres/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
 

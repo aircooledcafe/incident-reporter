@@ -319,6 +319,7 @@ Before starting the application (with Docker Compose or locally), copy `.env.exa
 | `POSTGRES_USER` | No | `soc_admin` | PostgreSQL database username. |
 | `POSTGRES_PASSWORD` | No | `soc_secure_pass` | PostgreSQL database password. |
 | `POSTGRES_PORT` | No | `5432` | PostgreSQL port. |
+| `HOST_PG_DIR` | No | `./data/postgres` | Host or attached EBS volume storage path for PostgreSQL database files (`/var/lib/postgresql/data`). |
 | `HOST_ARTIFACTS_DIR` | No | `./artifacts` | External/host directory mounted to `/data/artifacts` in Docker (stores all investigation folders, uploaded screenshots, manifests, and generated `.csv`/`.odt`/`.md`/`.zip` reports). |
 | `DJANGO_SUPERUSER_USERNAME` | No | *(Empty)* | Optional initial Super Admin username created on startup by `ensure_superuser`. |
 | `DJANGO_SUPERUSER_PASSWORD` | No | *(Empty)* | Optional initial Super Admin password created on startup by `ensure_superuser`. |
@@ -353,13 +354,17 @@ All application and user-created state lives outside the containers:
 
 | Mount / Volume | Container Mount | Persisted Data |
 | :--- | :--- | :--- |
-| `postgres_data` *(Docker volume)* | `/var/lib/postgresql/data` | PostgreSQL tables: **`Customer`**, **`CustomerContact`**, **`Investigation`**, **`auth_user`**, **`UserProfile`**, **`django_session`**, **`authtoken_token`**, **`RelatedIncident`**, **`ExternalResearch`**, and **`EvidenceItem`** metadata. |
+| `HOST_PG_DIR` *(default `./data/postgres`)* | `/var/lib/postgresql/data` | PostgreSQL tables: **`Customer`**, **`CustomerContact`**, **`Investigation`**, **`auth_user`**, **`UserProfile`**, **`django_session`**, **`authtoken_token`**, **`RelatedIncident`**, **`ExternalResearch`**, and **`EvidenceItem`** metadata. |
 | `HOST_ARTIFACTS_DIR` *(default `./artifacts`)* | `/data/artifacts` | User profile **`avatars/`**, per-investigation folders, uploaded **`screenshots/`**, PCAPs, generated **`reports/`** (`.csv`, `.odt`, `.md`, `.zip`), and **`archive_manifest.json`**. |
 
-To store artifacts on an external disk, NAS/NFS share, or SAN mount (e.g., `/mnt/soc-storage`), set in `.env`:
+To store data on a dedicated attached storage volume (such as an AWS EBS volume mounted at `/mnt/incident-data`), set in `.env`:
 ```ini
-HOST_ARTIFACTS_DIR=/mnt/soc-storage/incident-reporter/artifacts
+HOST_PG_DIR=/mnt/incident-data/postgres
+HOST_ARTIFACTS_DIR=/mnt/incident-data/artifacts
 ```
+
+> [!TIP]
+> For a complete, step-by-step guide to provisioning and mounting a dedicated persistent AWS EBS volume, setting up automated daily snapshots, and zero-port Cloudflare Tunnel ingress on EC2, see **[DEPLOYMENT_AWS.md](file:///Users/ben/incident-reporter/DEPLOYMENT_AWS.md)**.
 
 ### 1. Build and Start with Docker Compose
 ```bash
