@@ -42,6 +42,8 @@ import {
   Download,
   Building2,
   X,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { api } from './api';
 import HomeDashboard from './HomeDashboard';
@@ -270,8 +272,26 @@ export default function App() {
   const [savingQuickCustomer, setSavingQuickCustomer] = useState(false);
   const [quickCustomerError, setQuickCustomerError] = useState('');
 
-  // Sidebar filter: 'open' (default) | 'all' | status | 'archived' | 'locked'
+  // Sidebar filter & visibility toggle
   const [sidebarFilter, setSidebarFilter] = useState('open');
+  const [showSidebar, setShowSidebar] = useState(() => {
+    try {
+      const stored = localStorage.getItem('incident_reporter_show_sidebar');
+      return stored !== null ? stored === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleSidebar = () => {
+    setShowSidebar((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('incident_reporter_show_sidebar', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Navbar dropdown states & outside-click refs
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -1858,14 +1878,24 @@ export default function App() {
           /* ==================== INVESTIGATIONS WORKSPACE VIEW ==================== */
           <Row className="g-4">
             {/* Left Sidebar: Investigations List */}
-            <Col lg={3} xl={2}>
-              <Card className="soc-card">
-                <Card.Header className="soc-card-header py-2">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <span className="small text-uppercase text-secondary">
-                      Investigations ({visibleSidebarProjects.length})
-                    </span>
-                  </div>
+            {showSidebar && (
+              <Col lg={3} xl={2}>
+                <Card className="soc-card">
+                  <Card.Header className="soc-card-header py-2">
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="small text-uppercase text-secondary">
+                        Investigations ({visibleSidebarProjects.length})
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-link p-0 text-secondary text-decoration-none hover-light"
+                        onClick={handleToggleSidebar}
+                        title="Hide side panel"
+                        aria-label="Hide side panel"
+                      >
+                        <PanelLeftClose size={15} />
+                      </button>
+                    </div>
                   <div className="mt-2 pt-1 border-top border-secondary">
                     <Form.Select
                       size="sm"
@@ -1978,12 +2008,26 @@ export default function App() {
                 </Card.Body>
               </Card>
             </Col>
+          )}
 
-            {/* Main Investigation Area */}
-            <Col lg={9} xl={10}>
+          {/* Main Investigation Area */}
+          <Col lg={showSidebar ? 9 : 12} xl={showSidebar ? 10 : 12}>
               {!activeProject ? (
                 <Card className="soc-card text-center py-5">
                   <Card.Body>
+                    {!showSidebar && (
+                      <div className="mb-3">
+                        <Button
+                          variant="outline-secondary"
+                          size="sm"
+                          className="d-inline-flex align-items-center gap-1"
+                          onClick={handleToggleSidebar}
+                        >
+                          <PanelLeftOpen size={14} className="text-lb-cyan" />
+                          <span>Show Side Panel</span>
+                        </Button>
+                      </div>
+                    )}
                     <h5 className="text-white mb-2">
                       {canEditRole
                         ? 'Select or Create an Investigation'
@@ -2016,6 +2060,27 @@ export default function App() {
                     {/* Top Row: Title on Left, Status Dropdown Right-Justified */}
                     <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
                       <div className="d-flex flex-wrap align-items-center gap-2">
+                        <Button
+                          variant="outline-secondary"
+                          size="sm"
+                          className="d-inline-flex align-items-center gap-1 py-1 px-2"
+                          onClick={handleToggleSidebar}
+                          title={showSidebar ? 'Hide side panel' : 'Show side panel'}
+                          aria-label={showSidebar ? 'Hide side panel' : 'Show side panel'}
+                        >
+                          {showSidebar ? (
+                            <>
+                              <PanelLeftClose size={14} className="text-secondary" />
+                              <span className="small d-none d-sm-inline">Hide Panel</span>
+                            </>
+                          ) : (
+                            <>
+                              <PanelLeftOpen size={14} className="text-lb-cyan" />
+                              <span className="small">Show Panel</span>
+                            </>
+                          )}
+                        </Button>
+
                         <h4 className="mb-0 text-white fw-semibold">
                           {activeProject.title || `Investigation ${activeProject.investigation_id || '#' + activeProject.id}`}
                         </h4>
