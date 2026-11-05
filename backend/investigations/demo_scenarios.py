@@ -126,9 +126,6 @@ def _materialize_scenario(spec: dict) -> Investigation:
             customer=customer,
             name=contact["name"],
             defaults={
-                "role_title": contact.get("role_title", ""),
-                "email": contact.get("email", ""),
-                "phone": contact.get("phone", ""),
                 "notes": contact.get("notes", ""),
                 "escalation_tier": tier,
             },

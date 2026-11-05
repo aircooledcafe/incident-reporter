@@ -52,10 +52,11 @@ import EvidenceDetailModal from './EvidenceDetailModal';
 import { MitreTacticsSelect, MitreTechniquesSelect } from './MitreMultiSelect';
 
 const STATUS_LABELS = {
-  OPEN: 'Open / Triage',
+  OPEN: 'Triage',
   INVESTIGATING: 'Investigating',
+  AWAITING_CUSTOMER: 'Awaiting Customer',
   CONTAINED: 'Contained',
-  ARCHIVED: 'Archived / Closed',
+  ARCHIVED: 'Closed',
 };
 
 const ROLE_LABELS = {
@@ -269,9 +270,8 @@ export default function App() {
   const [savingQuickCustomer, setSavingQuickCustomer] = useState(false);
   const [quickCustomerError, setQuickCustomerError] = useState('');
 
-  // Sidebar Archived/Closed & Locked filters (both hidden by default)
-  const [showArchivedSidebar, setShowArchivedSidebar] = useState(false);
-  const [showLockedSidebar, setShowLockedSidebar] = useState(false);
+  // Sidebar filter: 'open' (default) | 'all' | status | 'archived' | 'locked'
+  const [sidebarFilter, setSidebarFilter] = useState('open');
 
   // Navbar dropdown states & outside-click refs
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -1298,19 +1298,37 @@ export default function App() {
     );
   }
 
-  // Sidebar projects filtering:
-  // Locked projects are hidden by default unless showLockedSidebar is enabled.
-  // Archived (unlocked) projects are hidden by default unless showArchivedSidebar is enabled.
+  // Sidebar projects filtering by status, all, open, closed, or locked:
+  const openCount = projects.filter((p) => p.status !== 'ARCHIVED' && !p.is_locked).length;
   const lockedCount = projects.filter((p) => Boolean(p.is_locked)).length;
-  const archivedCount = projects.filter((p) => !p.is_locked && p.status === 'ARCHIVED').length;
+  const archivedCount = projects.filter((p) => p.status === 'ARCHIVED').length;
+  const triageCount = projects.filter((p) => p.status === 'OPEN').length;
+  const investigatingCount = projects.filter((p) => p.status === 'INVESTIGATING').length;
+  const awaitingCount = projects.filter((p) => p.status === 'AWAITING_CUSTOMER').length;
+  const containedCount = projects.filter((p) => p.status === 'CONTAINED').length;
+
   const visibleSidebarProjects = projects.filter((p) => {
-    if (p.is_locked) {
-      return showLockedSidebar;
+    switch (sidebarFilter) {
+      case 'all':
+        return true;
+      case 'OPEN':
+        return p.status === 'OPEN';
+      case 'INVESTIGATING':
+        return p.status === 'INVESTIGATING';
+      case 'AWAITING_CUSTOMER':
+        return p.status === 'AWAITING_CUSTOMER';
+      case 'CONTAINED':
+        return p.status === 'CONTAINED';
+      case 'archived':
+      case 'ARCHIVED':
+      case 'closed':
+        return p.status === 'ARCHIVED';
+      case 'locked':
+        return Boolean(p.is_locked);
+      case 'open':
+      default:
+        return p.status !== 'ARCHIVED' && !p.is_locked;
     }
-    if (p.status === 'ARCHIVED') {
-      return showArchivedSidebar;
-    }
-    return true;
   });
 
   const userInitials = (() => {
@@ -1413,8 +1431,6 @@ export default function App() {
         ['ANALYST', 'Analyst (Create & Modify Investigations)'],
         ['EXECUTIVE', 'Executive (Read-Only & Report Export)'],
       ];
-
-  const topMenuRoleText = authUser.job_role || ROLE_LABELS[authUser.role] || authUser.role;
 
   return (
     <div className="min-vh-100 d-flex flex-column">
@@ -1567,9 +1583,23 @@ export default function App() {
                   <span className="user-avatar-circle">{userInitials}</span>
                 )}
                 <span className="small text-white fw-semibold">{currentAnalystName}</span>
-                <Badge bg={ROLE_BADGE_BG[authUser.role] || 'secondary'} style={{ fontSize: '0.68rem' }}>
-                  {topMenuRoleText}
-                </Badge>
+
+                {/* Privileged Account Role Badge */}
+                {authUser.role === 'SUPER_ADMIN' && (
+                  <Badge bg="danger" className="text-white fw-semibold" style={{ fontSize: '0.68rem' }}>
+                    Super Admin
+                  </Badge>
+                )}
+                {authUser.role === 'ADMIN' && (
+                  <Badge
+                    bg="dark"
+                    className="border border-secondary text-lb-cyan fw-normal"
+                    style={{ fontSize: '0.68rem' }}
+                  >
+                    Admin
+                  </Badge>
+                )}
+
                 <ChevronDown size={14} className="text-secondary" />
               </button>
 
@@ -1580,9 +1610,26 @@ export default function App() {
                       {currentAnalystName}
                       {authUser.pronouns ? ` (${authUser.pronouns})` : ''}
                     </div>
-                    <div className="text-lb-cyan" style={{ fontSize: '0.75rem' }}>
-                      {authUser.job_role ? `${authUser.job_role} • ` : ''}
-                      {ROLE_LABELS[authUser.role] || authUser.role}
+                    <div className="mt-1">
+                      {authUser.role === 'SUPER_ADMIN' && (
+                        <Badge bg="danger" className="text-white fw-semibold" style={{ fontSize: '0.68rem' }}>
+                          Super Admin
+                        </Badge>
+                      )}
+                      {authUser.role === 'ADMIN' && (
+                        <Badge
+                          bg="dark"
+                          className="border border-secondary text-lb-cyan fw-normal"
+                          style={{ fontSize: '0.68rem' }}
+                        >
+                          Admin
+                        </Badge>
+                      )}
+                      {authUser.role !== 'SUPER_ADMIN' && authUser.role !== 'ADMIN' && (
+                        <Badge bg="secondary" style={{ fontSize: '0.68rem' }}>
+                          {ROLE_LABELS[authUser.role] || authUser.role}
+                        </Badge>
+                      )}
                     </div>
                     <div className="mono-text text-secondary" style={{ fontSize: '0.75rem' }}>
                       @{authUser.username}
@@ -1819,23 +1866,23 @@ export default function App() {
                       Investigations ({visibleSidebarProjects.length})
                     </span>
                   </div>
-                  <div className="mt-2 pt-1 border-top border-secondary d-flex flex-column gap-1">
-                    <Form.Check
-                      type="switch"
-                      id="show-archived-switch"
-                      label={`Show Archived (${archivedCount})`}
-                      checked={showArchivedSidebar}
-                      onChange={(e) => setShowArchivedSidebar(e.target.checked)}
-                      className="small text-secondary"
-                    />
-                    <Form.Check
-                      type="switch"
-                      id="show-locked-switch"
-                      label={`Show Locked (${lockedCount})`}
-                      checked={showLockedSidebar}
-                      onChange={(e) => setShowLockedSidebar(e.target.checked)}
-                      className="small text-secondary"
-                    />
+                  <div className="mt-2 pt-1 border-top border-secondary">
+                    <Form.Select
+                      size="sm"
+                      value={sidebarFilter}
+                      onChange={(e) => setSidebarFilter(e.target.value)}
+                      className="bg-dark text-light border-secondary"
+                      aria-label="Filter investigations sidebar"
+                    >
+                      <option value="open">Open ({openCount})</option>
+                      <option value="all">All ({projects.length})</option>
+                      <option value="OPEN">Triage ({triageCount})</option>
+                      <option value="INVESTIGATING">Investigating ({investigatingCount})</option>
+                      <option value="AWAITING_CUSTOMER">Awaiting Customer ({awaitingCount})</option>
+                      <option value="CONTAINED">Contained ({containedCount})</option>
+                      <option value="archived">Closed ({archivedCount})</option>
+                      <option value="locked">Locked ({lockedCount})</option>
+                    </Form.Select>
                   </div>
                 </Card.Header>
                 <Card.Body className="p-2">
@@ -1847,7 +1894,7 @@ export default function App() {
                     <div className="text-center py-3 px-2 text-secondary small">
                       <p className="mb-2">
                         {projects.length > 0
-                          ? 'No open unlocked investigations. Toggle "Show Archived" or "Show Locked" above.'
+                          ? 'No investigations match the selected filter.'
                           : 'No investigations created yet.'}
                       </p>
                       {canEditRole && (
@@ -1874,13 +1921,8 @@ export default function App() {
                             }`}
                           >
                             <div className="d-flex justify-content-between align-items-start gap-1">
-                              <div className="text-truncate">
-                                <div className="mb-1">
-                                  <span className="badge bg-dark border border-info text-lb-cyan mono-text" style={{ fontSize: '0.68rem' }}>
-                                    {p.investigation_id || `INV${String(p.id).padStart(6, '0')}`}
-                                  </span>
-                                </div>
-                                <div className="fw-semibold small text-white text-truncate">
+                              <div className="text-truncate w-100">
+                                <div className="fw-semibold small text-white text-truncate mb-1">
                                   {p.title || `Investigation ${p.investigation_id || '#' + p.id}`}
                                 </div>
                               </div>
@@ -1892,10 +1934,21 @@ export default function App() {
                                 />
                               )}
                             </div>
-                            <div className="mt-1 mb-1 d-flex flex-wrap gap-1">
+                            <div className="mt-1 mb-1 d-flex flex-wrap gap-1 align-items-center">
+                              <Badge
+                                bg="dark"
+                                className="border border-secondary text-lb-cyan fw-normal font-monospace"
+                                style={{ fontSize: '0.68rem' }}
+                              >
+                                {p.investigation_id || `INV${String(p.id).padStart(6, '0')}`}
+                              </Badge>
                               <Badge
                                 bg={p.status === 'ARCHIVED' ? 'secondary' : 'dark'}
-                                className="border border-secondary text-lb-cyan fw-normal"
+                                className={`border ${
+                                  p.status === 'INVESTIGATING'
+                                    ? 'border-lb-lime text-lb-lime'
+                                    : 'border-secondary text-lb-cyan'
+                                } fw-normal`}
                                 style={{ fontSize: '0.68rem' }}
                               >
                                 {STATUS_LABELS[p.status] || p.status}
@@ -1959,12 +2012,10 @@ export default function App() {
               ) : (
                 <>
                   {/* Investigation Header */}
-                  <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary">
-                    <div>
-                      <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
-                        <Badge bg="dark" className="border border-info text-lb-cyan fs-6 mono-text">
-                          {activeProject.investigation_id || `INV${String(activeProject.id).padStart(6, '0')}`}
-                        </Badge>
+                  <div className="mb-3 pb-2 border-bottom border-secondary d-flex flex-column gap-2">
+                    {/* Top Row: Title on Left, Status Dropdown Right-Justified */}
+                    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                      <div className="d-flex flex-wrap align-items-center gap-2">
                         <h4 className="mb-0 text-white fw-semibold">
                           {activeProject.title || `Investigation ${activeProject.investigation_id || '#' + activeProject.id}`}
                         </h4>
@@ -1975,10 +2026,81 @@ export default function App() {
                           </Badge>
                         )}
                       </div>
+
+                      {/* Status Selection Dropdown (Right-Justified on the same line as Title) */}
+                      <div>
+                        {canModifyActiveProject ? (
+                          <div className="position-relative d-inline-block">
+                            <button
+                              type="button"
+                              onClick={() => setShowHeaderStatusPicker((prev) => !prev)}
+                              className="btn btn-sm btn-outline-light py-1 px-2 d-inline-flex align-items-center gap-1"
+                              style={{ fontSize: '0.8rem' }}
+                              title="Click to change investigation status"
+                            >
+                              <span>
+                                Status:{' '}
+                                <strong
+                                  className={
+                                    activeProject.status === 'INVESTIGATING'
+                                      ? 'text-lb-lime'
+                                      : 'text-lb-cyan'
+                                  }
+                                >
+                                  {STATUS_LABELS[activeProject.status] || activeProject.status}
+                                </strong>
+                              </span>
+                              <ChevronDown size={13} />
+                            </button>
+
+                            {showHeaderStatusPicker && (
+                              <div
+                                className="position-absolute end-0 mt-1 p-1 rounded soc-card shadow-lg"
+                                style={{ zIndex: 1050, minWidth: '190px' }}
+                              >
+                                {Object.entries(STATUS_LABELS).map(([code, label]) => (
+                                  <button
+                                    key={code}
+                                    type="button"
+                                    onClick={() => handleHeaderStatusSelect(code)}
+                                    className={`btn btn-sm w-100 text-start py-1 px-2 ${
+                                      activeProject.status === code
+                                        ? 'btn-lb-primary'
+                                        : code === 'INVESTIGATING'
+                                        ? 'btn-dark bg-transparent border-0 text-lb-lime'
+                                        : 'btn-dark bg-transparent border-0 text-light'
+                                    }`}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="small text-secondary">
+                            Status:{' '}
+                            <Badge
+                              bg={activeProject.status === 'ARCHIVED' ? 'secondary' : 'dark'}
+                              className={`border ${
+                                activeProject.status === 'INVESTIGATING'
+                                  ? 'border-lb-lime text-lb-lime'
+                                  : 'border-secondary text-lb-cyan'
+                              } fw-normal`}
+                            >
+                              {STATUS_LABELS[activeProject.status] || activeProject.status}
+                            </Badge>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Second Row: Metadata on Left, Action Buttons on Right */}
+                    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
                       <div className="text-secondary small d-flex flex-wrap align-items-center gap-3">
-                        <span>ID: <strong className="text-lb-cyan mono-text">{activeProject.investigation_id || `INV${String(activeProject.id).padStart(6, '0')}`}</strong></span>
-                        <span>Customer: {activeProject.customer_name || 'N/A'}</span>
-                        <span>Customer ID: <strong className="text-light mono-text">{activeProject.customer_id || 'N/A'}</strong></span>
+                        <span>ID: <strong className="text-white mono-text">{activeProject.investigation_id || `INV${String(activeProject.id).padStart(6, '0')}`}</strong></span>
+                        <span>Customer: <strong className="text-white">{activeProject.customer_name || 'N/A'}</strong></span>
+                        <span>Customer ID: <strong className="text-white mono-text">{activeProject.customer_id || 'N/A'}</strong></span>
                         <span>
                           Ticket:{' '}
                           {activeProject.ticket_link ? (
@@ -1995,58 +2117,7 @@ export default function App() {
                             activeProject.ticket_id || 'N/A'
                           )}
                         </span>
-
-                        {/* Status Picker (clickable only when user can modify unlocked project) */}
-                        {canModifyActiveProject ? (
-                          <div className="position-relative d-inline-block">
-                            <button
-                              type="button"
-                              onClick={() => setShowHeaderStatusPicker((prev) => !prev)}
-                              className="btn btn-sm btn-outline-light py-1 px-2 d-inline-flex align-items-center gap-1"
-                              style={{ fontSize: '0.78rem' }}
-                              title="Click to change investigation status"
-                            >
-                              <span>
-                                Status:{' '}
-                                <strong>
-                                  {STATUS_LABELS[activeProject.status] || activeProject.status}
-                                </strong>
-                              </span>
-                              <ChevronDown size={13} />
-                            </button>
-
-                            {showHeaderStatusPicker && (
-                              <div
-                                className="position-absolute start-0 mt-1 p-1 rounded soc-card shadow-lg"
-                                style={{ zIndex: 1050, minWidth: '190px' }}
-                              >
-                                {Object.entries(STATUS_LABELS).map(([code, label]) => (
-                                  <button
-                                    key={code}
-                                    type="button"
-                                    onClick={() => handleHeaderStatusSelect(code)}
-                                    className={`btn btn-sm w-100 text-start py-1 px-2 ${
-                                      activeProject.status === code
-                                        ? 'btn-lb-primary'
-                                        : 'btn-dark bg-transparent border-0 text-light'
-                                    }`}
-                                  >
-                                    {label}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span>
-                            Status:{' '}
-                            <strong className="text-light">
-                              {STATUS_LABELS[activeProject.status] || activeProject.status}
-                            </strong>
-                          </span>
-                        )}
                       </div>
-                    </div>
 
                     <div className="d-flex flex-wrap gap-2 mt-2 mt-md-0">
                       {canModifyActiveProject && (
@@ -2121,6 +2192,7 @@ export default function App() {
                       )}
                     </div>
                   </div>
+                </div>
 
                   {/* Read-Only Banner when Investigation is Locked */}
                   {isProjectLocked && (
@@ -2649,9 +2721,7 @@ export default function App() {
                               <p className="small text-secondary mb-3">
                                 Exports all {activeProject.evidence_count} investigation evidence
                                 items in chronological order as a CSV file (
-                                <code>date_customer_id_ticket_investigation_id.csv</code>, omitting
-                                ticket if none is set), with defanged assets/indicators and MITRE
-                                tactics and techniques.
+                                <code>date_customer_id_ticket_investigation_id.csv</code>). This will include all data, indicators, commands, notes, links, and MITRE tactics and techniques.
                               </p>
                               <div>
                                 <Button
@@ -2675,10 +2745,10 @@ export default function App() {
                             </Card.Header>
                             <Card.Body className="d-flex flex-column justify-content-between">
                               <p className="small text-secondary mb-3">
-                                Exports only the {activeProject.key_evidence_count} Key Evidence
-                                items from this investigation in chronological order, followed by
-                                summary tables for Key Assets Affected, Key Malicious Indicators,
-                                and MITRE Tactics &amp; Techniques.
+                                Generates a report template based on the {activeProject.key_evidence_count} Key Evidence
+                                items from this investigation. The report will include an executive summary made from the investigation summary,
+                                followed by a chronological timeline of key evidence, and summary tables for Key Assets Affected, Key Malicious
+                                Indicators, and MITRE Tactics &amp; Techniques.
                               </p>
                               <div className="d-flex flex-wrap gap-2">
                                 <Button
@@ -2955,7 +3025,7 @@ export default function App() {
         )}
       </Container>
 
-      {/* Warning Modal when Closing / Archiving an Investigation */}
+      {/* Warning Modal when Closing an Investigation */}
       <Modal
         show={showArchiveWarningModal}
         onHide={() => {
@@ -2968,17 +3038,17 @@ export default function App() {
         <Modal.Header closeButton className="bg-dark border-warning">
           <Modal.Title className="fs-6 d-flex align-items-center gap-2 text-warning">
             <AlertTriangle size={18} />
-            <span>Confirm Closing / Archiving Investigation</span>
+            <span>Confirm Closing Investigation</span>
           </Modal.Title>
         </Modal.Header>
         <Modal.Body className="bg-dark text-light small">
           <p className="mb-2">
             Are you sure you want to mark this investigation as{' '}
-            <strong>Archived / Closed</strong>?
+            <strong>Closed</strong>?
           </p>
           <p className="text-secondary mb-0">
-            Archived investigations are hidden from the sidebar by default. You can still view and
-            re-open them anytime by enabling the <strong>Show Archived</strong> toggle in the
+            Closed investigations are hidden from the sidebar by default. You can still view and
+            re-open them anytime by selecting the <strong>Closed</strong> filter in the
             investigations sidebar.
           </p>
         </Modal.Body>
@@ -2994,7 +3064,7 @@ export default function App() {
             Cancel
           </Button>
           <Button variant="warning" size="sm" onClick={confirmArchiveAction}>
-            Archive / Close Investigation
+            Close Investigation
           </Button>
         </Modal.Footer>
       </Modal>
@@ -3052,7 +3122,7 @@ export default function App() {
               <Modal.Title className="fs-6 mb-0 text-white">
                 {editingProject ? 'Edit Investigation Overview' : 'New Investigation'}
               </Modal.Title>
-              <Badge bg="dark" className="border border-info text-lb-cyan fw-normal mono-text">
+              <Badge bg="dark" className="border border-secondary text-lb-cyan fw-normal mono-text">
                 {editingProject
                   ? (activeProject?.investigation_id || `INV${String(activeProject?.id || '').padStart(6, '0')}`)
                   : 'Investigation Setup (Auto ID)'}
@@ -3083,10 +3153,11 @@ export default function App() {
                       value={projectForm.status}
                       onChange={(e) => setProjectForm({ ...projectForm, status: e.target.value })}
                     >
-                      <option value="OPEN">Open / Triage</option>
+                      <option value="OPEN">Triage</option>
                       <option value="INVESTIGATING">Investigating</option>
+                      <option value="AWAITING_CUSTOMER">Awaiting Customer</option>
                       <option value="CONTAINED">Contained</option>
-                      <option value="ARCHIVED">Archived / Closed</option>
+                      <option value="ARCHIVED">Closed</option>
                     </Form.Select>
                   </Form.Group>
                 </Col>

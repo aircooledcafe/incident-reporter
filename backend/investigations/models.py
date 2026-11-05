@@ -11,6 +11,20 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 
+User = get_user_model()
+
+
+def _user_display_str(self) -> str:
+    full_name = f"{self.first_name} {self.last_name}".strip()
+    if full_name:
+        return f"{self.username} ({full_name})"
+    return self.username
+
+
+# Make user representations throughout selection boxes display username as well as first name and last name
+User.__str__ = _user_display_str
+
+
 def avatar_upload_path(instance, filename):
     safe_name = os.path.basename(filename)
     uid = instance.user_id or "user"
@@ -165,9 +179,6 @@ class CustomerContact(models.Model):
         related_name='contacts',
     )
     name = models.CharField(max_length=255)
-    role_title = models.CharField(max_length=255, blank=True, default="")
-    email = models.EmailField(blank=True, default="")
-    phone = models.CharField(max_length=64, blank=True, default="")
     escalation_tier = models.CharField(
         max_length=16,
         choices=ESCALATION_CHOICES,
@@ -262,10 +273,11 @@ def generate_next_investigation_id() -> str:
 
 class Investigation(models.Model):
     STATUS_CHOICES = [
-        ('OPEN', 'Open / Triage'),
+        ('OPEN', 'Triage'),
         ('INVESTIGATING', 'Investigating'),
+        ('AWAITING_CUSTOMER', 'Awaiting Customer'),
         ('CONTAINED', 'Contained'),
-        ('ARCHIVED', 'Archived / Closed'),
+        ('ARCHIVED', 'Closed'),
     ]
 
     objects = InvestigationManager()
@@ -459,9 +471,6 @@ class Investigation(models.Model):
             {
                 "id": c.id,
                 "name": c.name,
-                "role_title": c.role_title,
-                "email": c.email,
-                "phone": c.phone,
                 "escalation_tier": c.escalation_tier,
                 "escalation_tier_display": c.get_escalation_tier_display(),
                 "notes": c.notes,

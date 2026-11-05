@@ -15,8 +15,6 @@ import {
   Plus,
   Trash2,
   Edit2,
-  Phone,
-  Mail,
   ShieldAlert,
   Search,
   CheckCircle,
@@ -58,9 +56,6 @@ export default function CustomerManagementModal({
   const [editingContact, setEditingContact] = useState(null);
   const [contactForm, setContactForm] = useState({
     name: '',
-    role_title: '',
-    email: '',
-    phone: '',
     escalation_tier: 'PRIMARY',
     notes: '',
   });
@@ -164,9 +159,6 @@ export default function CustomerManagementModal({
     setEditingContact(null);
     setContactForm({
       name: '',
-      role_title: '',
-      email: '',
-      phone: '',
       escalation_tier: 'PRIMARY',
       notes: '',
     });
@@ -178,9 +170,6 @@ export default function CustomerManagementModal({
     setEditingContact(contact);
     setContactForm({
       name: contact.name || '',
-      role_title: contact.role_title || '',
-      email: contact.email || '',
-      phone: contact.phone || '',
       escalation_tier: contact.escalation_tier || 'PRIMARY',
       notes: contact.notes || '',
     });
@@ -417,34 +406,8 @@ export default function CustomerManagementModal({
                                     </Badge>
                                   </div>
 
-                                  {contact.role_title && (
-                                    <div className="text-muted small">
-                                      {contact.role_title}
-                                    </div>
-                                  )}
-
-                                  <div className="mt-2 space-y-1">
-                                    {contact.email && (
-                                      <div className="text-light d-flex align-items-center gap-1 small text-truncate">
-                                        <Mail size={12} className="text-muted flex-shrink-0" />
-                                        <a
-                                          href={`mailto:${contact.email}`}
-                                          className="text-info text-decoration-none text-truncate"
-                                        >
-                                          {contact.email}
-                                        </a>
-                                      </div>
-                                    )}
-                                    {contact.phone && (
-                                      <div className="text-light d-flex align-items-center gap-1 small">
-                                        <Phone size={12} className="text-muted flex-shrink-0" />
-                                        <span>{contact.phone}</span>
-                                      </div>
-                                    )}
-                                  </div>
-
                                   {contact.notes && (
-                                    <div className="text-muted small mt-1 fst-italic border-top border-secondary pt-1">
+                                    <div className="text-muted small mt-2 fst-italic">
                                       {contact.notes}
                                     </div>
                                   )}
@@ -636,42 +599,8 @@ export default function CustomerManagementModal({
               </Form.Text>
             </Form.Group>
 
-            <Row className="g-2 mb-3">
-              <Col md={6}>
-                <Form.Label className="small fw-semibold text-light">Role / Title</Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder="e.g. CISO, SOC Lead"
-                  value={contactForm.role_title}
-                  onChange={(e) => setContactForm({ ...contactForm, role_title: e.target.value })}
-                  className="bg-dark text-light border-secondary"
-                />
-              </Col>
-              <Col md={6}>
-                <Form.Label className="small fw-semibold text-light">Phone</Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder="+1-555-0199"
-                  value={contactForm.phone}
-                  onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
-                  className="bg-dark text-light border-secondary mono-text"
-                />
-              </Col>
-            </Row>
-
             <Form.Group className="mb-3">
-              <Form.Label className="small fw-semibold text-light">Email Address</Form.Label>
-              <Form.Control
-                type="email"
-                placeholder="contact@customer.example"
-                value={contactForm.email}
-                onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
-                className="bg-dark text-light border-secondary mono-text"
-              />
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label className="small fw-semibold text-light">Availability / Notes</Form.Label>
+              <Form.Label className="small fw-semibold text-light">Availability / Escalation Notes</Form.Label>
               <Form.Control
                 as="textarea"
                 rows={2}

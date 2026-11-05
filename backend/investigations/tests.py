@@ -477,9 +477,6 @@ class IncidentReporterTests(TestCase):
             {
                 "project": proj_id,
                 "name": "Ellen Ripley",
-                "role_title": "Security Director",
-                "email": "ripley@acme-orbital.example",
-                "phone": "+1-555-0192",
                 "notes": "Primary incident commander",
             },
             format="json",
@@ -1093,9 +1090,6 @@ class IncidentReporterTests(TestCase):
             {
                 "customer": cust_id,
                 "name": "Miles Dyson",
-                "role_title": "Director of Special Projects",
-                "email": "dyson@cyberdyne.example",
-                "phone": "+1-555-0101",
                 "escalation_tier": "PRIMARY",
                 "notes": "24/7 Primary Emergency Lead",
             },
@@ -1110,9 +1104,6 @@ class IncidentReporterTests(TestCase):
             {
                 "customer": cust_id,
                 "name": "Sarah Connor",
-                "role_title": "Security Lead",
-                "email": "sconnor@cyberdyne.example",
-                "phone": "+1-555-0102",
                 "escalation_tier": "SECONDARY",
             },
             format="json",

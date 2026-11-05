@@ -20,6 +20,32 @@ from .permissions import is_super_admin
 User = get_user_model()
 
 
+def format_user_label(user) -> str:
+    full_name = f"{user.first_name} {user.last_name}".strip()
+    if not full_name and hasattr(user, 'profile') and getattr(user.profile, 'preferred_display_name', None):
+        full_name = user.profile.preferred_display_name.strip()
+    if full_name:
+        return f"{user.username} ({full_name})"
+    return user.username
+
+
+# Make user representations throughout admin selection boxes display username as well as first name and last name
+User.__str__ = format_user_label
+
+
+class UserLabelForeignKeyMixin:
+    """
+    Ensures all dropdown selection boxes that reference User in the Django admin
+    display both username and first name + last name (e.g. 'jsmith (John Smith)').
+    """
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        if formfield and hasattr(db_field, 'remote_field') and db_field.remote_field:
+            if db_field.remote_field.model == User:
+                formfield.label_from_instance = format_user_label
+        return formfield
+
+
 def _super_admin_only_permission(request) -> bool:
     """
     Restricts the Django /admin/ raw database interface strictly to active Super Admin accounts.
@@ -71,7 +97,7 @@ class CustomUserAdmin(BaseUserAdmin):
 
 
 @admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
+class UserProfileAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     list_display = ('user', 'role', 'job_role', 'preferred_display_name', 'pronouns', 'updated_at')
     list_filter = ('role',)
     search_fields = ('user__username', 'user__email', 'preferred_display_name', 'job_role')
@@ -84,7 +110,7 @@ class UserProfileAdmin(admin.ModelAdmin):
 class CustomerContactInline(admin.TabularInline):
     model = CustomerContact
     extra = 0
-    fields = ('name', 'role_title', 'email', 'phone', 'escalation_tier')
+    fields = ('name', 'escalation_tier', 'notes')
     show_change_link = True
 
 
@@ -109,9 +135,9 @@ class CustomerAdmin(admin.ModelAdmin):
 
 @admin.register(CustomerContact)
 class CustomerContactAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'customer_link', 'role_title', 'email', 'phone', 'escalation_tier', 'created_at')
+    list_display = ('id', 'name', 'customer_link', 'escalation_tier', 'notes', 'created_at')
     list_filter = ('escalation_tier', 'customer')
-    search_fields = ('name', 'role_title', 'email', 'customer__name')
+    search_fields = ('name', 'customer__name', 'notes')
 
     @admin.display(description='Customer')
     def customer_link(self, obj):
@@ -125,7 +151,7 @@ class CustomerContactAdmin(admin.ModelAdmin):
 # Evidence Attachments & Evidence Items
 # ==============================================================================
 
-class EvidenceScreenshotInline(admin.TabularInline):
+class EvidenceScreenshotInline(UserLabelForeignKeyMixin, admin.TabularInline):
     model = EvidenceScreenshot
     extra = 0
     fields = ('image', 'caption', 'created_by', 'uploaded_at')
@@ -133,7 +159,7 @@ class EvidenceScreenshotInline(admin.TabularInline):
     show_change_link = True
 
 
-class EvidencePcapInline(admin.TabularInline):
+class EvidencePcapInline(UserLabelForeignKeyMixin, admin.TabularInline):
     model = EvidencePcap
     extra = 0
     fields = ('file', 'description', 'created_by', 'uploaded_at')
@@ -141,7 +167,7 @@ class EvidencePcapInline(admin.TabularInline):
     show_change_link = True
 
 
-class EvidenceItemInline(admin.StackedInline):
+class EvidenceItemInline(UserLabelForeignKeyMixin, admin.StackedInline):
     """
     Inlines evidence items directly inside the parent Investigation object.
     """
@@ -181,7 +207,7 @@ class ExternalResearchInline(admin.TabularInline):
 
 
 @admin.register(EvidenceItem)
-class EvidenceItemAdmin(admin.ModelAdmin):
+class EvidenceItemAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     list_display = (
         'id',
         'investigation_link',
@@ -230,7 +256,8 @@ class EvidenceItemAdmin(admin.ModelAdmin):
     @admin.display(description='Added / Created By')
     def created_by_display(self, obj):
         if obj.created_by:
-            return obj.created_by.get_full_name() or obj.created_by.username
+            full_name = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+            return f"{obj.created_by.username} ({full_name})" if full_name else obj.created_by.username
         return obj.analyst_name or "-"
 
     @admin.display(description='Attachments')
@@ -260,7 +287,8 @@ class EvidenceItemAdmin(admin.ModelAdmin):
         # Dynamically inject mass assignment actions for active users
         active_users = User.objects.filter(is_active=True).order_by('username')[:20]
         for user in active_users:
-            display_name = user.get_full_name() or user.username
+            full_name = f"{user.first_name} {user.last_name}".strip()
+            display_name = f"{user.username} ({full_name})" if full_name else user.username
             action_name = f'mass_assign_evidence_to_user_{user.id}'
 
             def make_assign_action(target_user, label):
@@ -286,7 +314,7 @@ class EvidenceItemAdmin(admin.ModelAdmin):
 # ==============================================================================
 
 @admin.register(Investigation)
-class InvestigationAdmin(admin.ModelAdmin):
+class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     list_display = (
         'id',
         'title',
@@ -358,9 +386,11 @@ class InvestigationAdmin(admin.ModelAdmin):
     @admin.display(description='Status')
     def status_badge(self, obj):
         color = {
-            'INVESTIGATING': '#0d6efd',
+            'OPEN': '#0096b3',
+            'INVESTIGATING': '#198754',
+            'AWAITING_CUSTOMER': '#0096b3',
             'CONTAINED': '#ffc107',
-            'CLOSED': '#198754',
+            'ARCHIVED': '#6c757d',
             'DRAFT': '#6c757d',
         }.get(obj.status, '#495057')
         return format_html(
@@ -372,7 +402,8 @@ class InvestigationAdmin(admin.ModelAdmin):
     @admin.display(description='Lead Analyst')
     def lead_analyst_display(self, obj):
         if obj.lead_analyst_user:
-            return obj.lead_analyst_user.get_full_name() or obj.lead_analyst_user.username
+            full_name = f"{obj.lead_analyst_user.first_name} {obj.lead_analyst_user.last_name}".strip()
+            return f"{obj.lead_analyst_user.username} ({full_name})" if full_name else obj.lead_analyst_user.username
         return obj.lead_analyst or "-"
 
     @admin.display(description='Evidence Items')
@@ -406,7 +437,7 @@ class InvestigationAdmin(admin.ModelAdmin):
 
     @admin.action(description="Set Status: Closed")
     def action_status_closed(self, request, queryset):
-        count = queryset.update(status='CLOSED')
+        count = queryset.update(status='ARCHIVED')
         self.message_user(request, f"Updated {count} investigation(s) to 'Closed'.")
 
     def get_actions(self, request):

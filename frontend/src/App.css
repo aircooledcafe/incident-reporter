@@ -118,6 +118,10 @@ body {
   color: var(--lb-lime) !important;
 }
 
+.border-lb-lime {
+  border-color: var(--lb-lime) !important;
+}
+
 .text-lb-cyan {
   color: #38bdf8 !important;
 }
@@ -196,11 +200,13 @@ body {
   background-color: var(--lb-card-bg);
   border: 1px solid var(--lb-border);
   border-radius: 0.5rem;
-  transition: border-color 0.15s ease, transform 0.12s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.12s ease;
+  cursor: pointer;
 }
 
 .home-investigation-card:hover {
   border-color: var(--lb-cyan);
+  background-color: #0f1c36;
 }
 
 .user-avatar-circle {

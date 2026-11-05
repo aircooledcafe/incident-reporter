@@ -5,8 +5,6 @@ import {
   ExternalLink,
   Trash2,
   Plus,
-  Phone,
-  Mail,
   Link2,
   UserCheck,
   Save,
@@ -32,9 +30,6 @@ export default function ProjectOverviewExtras({
   // Customer Contact form state
   const [contactForm, setContactForm] = useState({
     name: '',
-    role_title: '',
-    email: '',
-    phone: '',
     escalation_tier: 'PRIMARY',
     notes: '',
   });
@@ -100,13 +95,10 @@ export default function ProjectOverviewExtras({
         project: activeProject.id,
         customer: activeProject.customer || activeProject.customer_detail?.id,
         name: contactForm.name.trim(),
-        role_title: contactForm.role_title.trim(),
-        email: contactForm.email.trim(),
-        phone: contactForm.phone.trim(),
         escalation_tier: contactForm.escalation_tier || 'PRIMARY',
         notes: contactForm.notes.trim(),
       });
-      setContactForm({ name: '', role_title: '', email: '', phone: '', escalation_tier: 'PRIMARY', notes: '' });
+      setContactForm({ name: '', escalation_tier: 'PRIMARY', notes: '' });
       await onProjectMutated(activeProject.id);
       onNotifySuccess('Customer contact added.');
     } catch (err) {
@@ -299,9 +291,6 @@ export default function ProjectOverviewExtras({
                 <tr>
                   <th>Tier</th>
                   <th>Name</th>
-                  <th>Role / Title</th>
-                  <th>Email</th>
-                  <th>Phone</th>
                   <th>Notes</th>
                   {canModifyActiveProject && <th className="text-end">Remove</th>}
                 </tr>
@@ -321,30 +310,6 @@ export default function ProjectOverviewExtras({
                         </span>
                       </td>
                       <td className="fw-semibold text-white">{c.name}</td>
-                      <td>{c.role_title || '—'}</td>
-                      <td className="mono-text">
-                        {c.email ? (
-                          <a
-                            href={`mailto:${c.email}`}
-                            className="text-lb-cyan text-decoration-none"
-                          >
-                            <Mail size={12} className="me-1" />
-                            {c.email}
-                          </a>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="mono-text">
-                        {c.phone ? (
-                          <span>
-                            <Phone size={12} className="me-1 text-secondary" />
-                            {c.phone}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
                       <td className="text-secondary">{c.notes || '—'}</td>
                       {canModifyActiveProject && (
                         <td className="text-end">
@@ -389,40 +354,11 @@ export default function ProjectOverviewExtras({
                     onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
                   />
                 </Col>
-                <Col md={2}>
+                <Col md={5}>
                   <Form.Control
                     size="sm"
                     type="text"
-                    placeholder="Role / Title"
-                    value={contactForm.role_title}
-                    onChange={(e) =>
-                      setContactForm({ ...contactForm, role_title: e.target.value })
-                    }
-                  />
-                </Col>
-                <Col md={3}>
-                  <Form.Control
-                    size="sm"
-                    type="email"
-                    placeholder="Email"
-                    value={contactForm.email}
-                    onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
-                  />
-                </Col>
-                <Col md={2}>
-                  <Form.Control
-                    size="sm"
-                    type="text"
-                    placeholder="Phone"
-                    value={contactForm.phone}
-                    onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
-                  />
-                </Col>
-                <Col md={10}>
-                  <Form.Control
-                    size="sm"
-                    type="text"
-                    placeholder="Contact notes / availability / escalation scope (optional)"
+                    placeholder="Escalation notes / availability / scope (optional)"
                     value={contactForm.notes}
                     onChange={(e) => setContactForm({ ...contactForm, notes: e.target.value })}
                   />

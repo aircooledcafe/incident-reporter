@@ -4,17 +4,17 @@ import {
   ExternalLink,
   Lock,
   Plus,
-  FolderOpen,
   ClipboardList,
   ArrowUpDown,
   Sparkles,
 } from 'lucide-react';
 
 const STATUS_LABELS = {
-  OPEN: 'Open / Triage',
+  OPEN: 'Triage',
   INVESTIGATING: 'Investigating',
+  AWAITING_CUSTOMER: 'Awaiting Customer',
   CONTAINED: 'Contained',
-  ARCHIVED: 'Archived / Closed',
+  ARCHIVED: 'Closed',
 };
 
 function formatUtcShort(isoString) {
@@ -34,13 +34,17 @@ export default function HomeDashboard({
   onSeedDemoScenario,
   demoScenarios,
 }) {
-  // Filter toggle: 'open' (default) | 'all' | 'archived' | 'locked'
+  // Filter toggle: 'open' (default) | 'all' | status | 'archived' | 'locked'
   const [viewFilter, setViewFilter] = useState('open');
   // Sort order: 'chrono_desc' | 'chrono_asc' | 'customer_asc' | 'customer_desc'
   const [sortOrder, setSortOrder] = useState('chrono_desc');
   const [searchQuery, setSearchQuery] = useState('');
 
   const openItems = projects.filter((p) => p.status !== 'ARCHIVED' && !p.is_locked);
+  const triageItems = projects.filter((p) => p.status === 'OPEN');
+  const investigatingItems = projects.filter((p) => p.status === 'INVESTIGATING');
+  const awaitingCustomerItems = projects.filter((p) => p.status === 'AWAITING_CUSTOMER');
+  const containedItems = projects.filter((p) => p.status === 'CONTAINED');
   const archivedItems = projects.filter((p) => p.status === 'ARCHIVED');
   const lockedItems = projects.filter((p) => Boolean(p.is_locked));
 
@@ -48,7 +52,17 @@ export default function HomeDashboard({
     switch (viewFilter) {
       case 'all':
         return projects;
+      case 'OPEN':
+        return triageItems;
+      case 'INVESTIGATING':
+        return investigatingItems;
+      case 'AWAITING_CUSTOMER':
+        return awaitingCustomerItems;
+      case 'CONTAINED':
+        return containedItems;
       case 'archived':
+      case 'ARCHIVED':
+      case 'closed':
         return archivedItems;
       case 'locked':
         return lockedItems;
@@ -100,13 +114,6 @@ export default function HomeDashboard({
     return timeB - timeA;
   });
 
-  const filterButtons = [
-    { key: 'open', label: 'Open', count: openItems.length },
-    { key: 'all', label: 'All', count: projects.length },
-    { key: 'archived', label: 'Archived', count: archivedItems.length },
-    { key: 'locked', label: 'Locked', count: lockedItems.length },
-  ];
-
   return (
     <div className="d-flex flex-column gap-3">
       {/* Top Controls Bar */}
@@ -121,43 +128,31 @@ export default function HomeDashboard({
                 Review active investigations, ticket links, customer details, investigation summaries, and analyst action plans.
               </div>
             </div>
-
-            {canEditRole && (
-              <div className="d-flex flex-wrap gap-2">
-                <Button className="btn-lb-green" size="sm" onClick={onOpenNewProject}>
-                  <Plus size={15} className="me-1" />
-                  New Investigation
-                </Button>
-              </div>
-            )}
           </div>
         </Card.Header>
 
         <Card.Body className="py-3">
           <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
-            {/* Toggles: Open | All | Archived | Locked */}
-            <div className="d-flex flex-wrap align-items-center gap-2" role="group" aria-label="Investigation status filters">
-              {filterButtons.map((btn) => {
-                const active = viewFilter === btn.key;
-                return (
-                  <Button
-                    key={btn.key}
-                    size="sm"
-                    className={active ? 'btn-lb-primary' : ''}
-                    variant={active ? undefined : 'outline-secondary'}
-                    onClick={() => setViewFilter(btn.key)}
-                  >
-                    <span>{btn.label}</span>
-                    <Badge
-                      bg={active ? 'light' : 'dark'}
-                      text={active ? 'dark' : 'light'}
-                      className="ms-2 border border-secondary"
-                    >
-                      {btn.count}
-                    </Badge>
-                  </Button>
-                );
-              })}
+            {/* Status Filter Dropdown */}
+            <div className="d-flex align-items-center gap-2">
+              <span className="small text-secondary fw-semibold text-nowrap">Filter:</span>
+              <Form.Select
+                size="sm"
+                value={viewFilter}
+                onChange={(e) => setViewFilter(e.target.value)}
+                className="bg-dark text-light border-secondary"
+                style={{ width: '220px' }}
+                aria-label="Filter investigations by status"
+              >
+                <option value="open">Open ({openItems.length})</option>
+                <option value="all">All ({projects.length})</option>
+                <option value="OPEN">Triage ({triageItems.length})</option>
+                <option value="INVESTIGATING">Investigating ({investigatingItems.length})</option>
+                <option value="AWAITING_CUSTOMER">Awaiting Customer ({awaitingCustomerItems.length})</option>
+                <option value="CONTAINED">Contained ({containedItems.length})</option>
+                <option value="archived">Closed ({archivedItems.length})</option>
+                <option value="locked">Locked ({lockedItems.length})</option>
+              </Form.Select>
             </div>
 
             {/* Ordering & Search Controls */}
@@ -233,31 +228,49 @@ export default function HomeDashboard({
       ) : (
         <div className="d-flex flex-column gap-3">
           {sortedItems.map((project) => (
-            <div key={project.id} className="home-investigation-card p-3">
-              {/* Top Row: Title, Badges, Open Investigation Button */}
+            <div
+              key={project.id}
+              className="home-investigation-card p-3"
+              onClick={() => onOpenInvestigation(project.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenInvestigation(project.id);
+                }
+              }}
+            >
+              {/* Top Row: Title, Badges */}
               <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 pb-2 mb-3 border-bottom border-secondary">
                 <div>
                   <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
-                    <span className="badge bg-dark border border-info text-lb-cyan mono-text fs-6">
-                      {project.investigation_id || `INV${String(project.id).padStart(6, '0')}`}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onOpenInvestigation(project.id)}
-                      className="btn btn-link p-0 text-start text-white fw-semibold text-decoration-none fs-5"
-                    >
+                    <span className="text-white fw-semibold fs-5">
                       {project.title || `Investigation ${project.investigation_id || '#' + project.id}`}
-                    </button>
+                    </span>
+
+                    <Badge
+                      bg="dark"
+                      className="border border-secondary text-lb-cyan fw-normal font-monospace"
+                      style={{ fontSize: '0.72rem' }}
+                    >
+                      {project.investigation_id || `INV${String(project.id).padStart(6, '0')}`}
+                    </Badge>
 
                     <Badge
                       bg={project.status === 'ARCHIVED' ? 'secondary' : 'dark'}
-                      className="border border-secondary text-lb-cyan fw-normal"
+                      className={`border ${
+                        project.status === 'INVESTIGATING'
+                          ? 'border-lb-lime text-lb-lime'
+                          : 'border-secondary text-lb-cyan'
+                      } fw-normal`}
+                      style={{ fontSize: '0.72rem' }}
                     >
                       {STATUS_LABELS[project.status] || project.status}
                     </Badge>
 
                     {project.is_locked && (
-                      <Badge bg="warning" text="dark" className="d-inline-flex align-items-center gap-1">
+                      <Badge bg="warning" text="dark" className="d-inline-flex align-items-center gap-1" style={{ fontSize: '0.72rem' }}>
                         <Lock size={11} />
                         Locked
                       </Badge>
@@ -280,6 +293,7 @@ export default function HomeDashboard({
                           href={project.ticket_link}
                           target="_blank"
                           rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
                           className="text-lb-cyan mono-text text-decoration-none"
                         >
                           {project.ticket_id || project.ticket_link} <ExternalLink size={12} />
@@ -296,15 +310,6 @@ export default function HomeDashboard({
                     </span>
                   </div>
                 </div>
-
-                <Button
-                  className="btn-lb-primary"
-                  size="sm"
-                  onClick={() => onOpenInvestigation(project.id)}
-                >
-                  <FolderOpen size={14} className="me-1" />
-                  Open Investigation
-                </Button>
               </div>
 
               {/* Related Escalated Incidents Strip (if any) */}
@@ -317,6 +322,7 @@ export default function HomeDashboard({
                       href={rel.link}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
                       className="badge bg-dark border border-secondary text-lb-cyan text-decoration-none fw-normal py-1 px-2"
                     >
                       {rel.title} <ExternalLink size={11} className="ms-1" />
