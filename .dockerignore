@@ -9,8 +9,6 @@
 backend/.venv
 .venv
 venv
-backend/db.sqlite3
-*.sqlite3
 
 # Node / Frontend build artifacts
 frontend/node_modules
@@ -20,8 +18,8 @@ dist
 npm-debug.log*
 
 # Local persistent data & investigation artifacts (mounted via volumes at runtime)
-data/db/*
-!data/db/.gitkeep
+data/postgres/*
+!data/postgres/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
 

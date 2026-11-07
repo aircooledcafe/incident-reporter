@@ -10,9 +10,13 @@ fi
 # Ensure external/mapped volume directory exists for investigation artifacts
 mkdir -p "${DJANGO_ARTIFACTS_ROOT:-/data/artifacts}"
 
-if [ -n "${POSTGRES_DB}" ]; then
-    echo "[Backend] Waiting for PostgreSQL database at ${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB}..."
-    python - <<'EOF'
+if [ -z "${POSTGRES_DB}" ]; then
+    echo "ERROR: POSTGRES_DB environment variable is not set." >&2
+    exit 1
+fi
+
+echo "[Backend] Waiting for PostgreSQL database at ${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB}..."
+python - <<'EOF'
 import sys
 import time
 import os
@@ -45,11 +49,7 @@ for i in range(1, max_tries + 1):
 print("[Backend] ERROR: Timed out waiting for PostgreSQL.", file=sys.stderr)
 sys.exit(1)
 EOF
-    echo "[Backend] Running database migrations on PostgreSQL (${POSTGRES_DB})..."
-else
-    mkdir -p "$(dirname "${DJANGO_DB_PATH:-/data/db/db.sqlite3}")"
-    echo "[Backend] Running database migrations on SQLite (${DJANGO_DB_PATH:-/data/db/db.sqlite3})..."
-fi
+echo "[Backend] Running database migrations on PostgreSQL (${POSTGRES_DB})..."
 
 python manage.py migrate --noinput
 

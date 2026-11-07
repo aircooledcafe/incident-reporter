@@ -1,6 +1,9 @@
 import json
 import os
+import re
 import shutil
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -13,20 +16,75 @@ from django.utils.text import slugify
 
 User = get_user_model()
 
-
-def _user_display_str(self) -> str:
-    full_name = f"{self.first_name} {self.last_name}".strip()
-    if full_name:
-        return f"{self.username} ({full_name})"
-    return self.username
+MAX_DB_PK = 9_223_372_036_854_775_807
+_DELETING_INVESTIGATION_IDS: set[int] = set()
+_SYNC_STATE = threading.local()
 
 
-# Make user representations throughout selection boxes display username as well as first name and last name
-User.__str__ = _user_display_str
+@contextmanager
+def suppress_timeline_sync():
+    """
+    Temporarily suppresses post_save/post_delete timeline sync signals during batch operations
+    so callers can perform a single sync_timeline_events() once the batch completes.
+    """
+    depth = getattr(_SYNC_STATE, 'suppress_depth', 0)
+    _SYNC_STATE.suppress_depth = depth + 1
+    try:
+        yield
+    finally:
+        _SYNC_STATE.suppress_depth = max(0, getattr(_SYNC_STATE, 'suppress_depth', 1) - 1)
+
+
+def is_timeline_sync_suppressed() -> bool:
+    return getattr(_SYNC_STATE, 'suppress_depth', 0) > 0
+
+
+def is_valid_pk_int(value) -> bool:
+    """Returns True only if `value` represents a positive 64-bit integer database primary key."""
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, int):
+        return 0 < value <= MAX_DB_PK
+    s = str(value).strip()
+    if not s or not s.isascii() or not s.isdigit():
+        return False
+    val = int(s)
+    return 0 < val <= MAX_DB_PK
+
+
+def format_user_label(user) -> str:
+    """
+    Canonical string label for User objects across Django Admin dropdowns and audit displays:
+    renders `username (First Last)` when a name is available, otherwise `username`.
+    """
+    if not user:
+        return ""
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    if not full_name:
+        try:
+            profile = getattr(user, 'profile', None)
+            if profile and (profile.preferred_display_name or "").strip():
+                full_name = profile.preferred_display_name.strip()
+        except Exception:
+            pass
+    if full_name and full_name != user.username:
+        return f"{user.username} ({full_name})"
+    return user.username
+
+
+def _sanitize_upload_filename(filename: str, fallback: str = "attachment") -> str:
+    raw_base = os.path.basename(str(filename or "").replace("\\", "/"))
+    cleaned = re.sub(r'[\x00-\x1f\x7f"<>|:*?]+', '_', raw_base).strip(" .")
+    if not cleaned or cleaned in {".", ".."}:
+        return fallback
+    if len(cleaned) > 180:
+        stem, ext = os.path.splitext(cleaned)
+        cleaned = f"{stem[:160]}{ext[:20]}"
+    return cleaned
 
 
 def avatar_upload_path(instance, filename):
-    safe_name = os.path.basename(filename)
+    safe_name = _sanitize_upload_filename(filename, fallback="avatar.png")
     uid = instance.user_id or "user"
     return f"avatars/user_{uid}_{safe_name}"
 
@@ -202,14 +260,14 @@ class CustomerContact(models.Model):
 def screenshot_upload_path(instance, filename):
     inv = instance.evidence.investigation
     folder = inv.get_or_create_artifact_folder()
-    safe_name = os.path.basename(filename)
+    safe_name = _sanitize_upload_filename(filename, fallback="screenshot.png")
     return f"{folder}/screenshots/evidence_{instance.evidence.id}_{safe_name}"
 
 
 def pcap_upload_path(instance, filename):
     inv = instance.evidence.investigation
     folder = inv.get_or_create_artifact_folder()
-    safe_name = os.path.basename(filename)
+    safe_name = _sanitize_upload_filename(filename, fallback="capture.pcap")
     return f"{folder}/pcaps/evidence_{instance.evidence.id}_{safe_name}"
 
 
@@ -248,8 +306,6 @@ def generate_next_investigation_id() -> str:
     Finds the highest existing INV###### number starting from 0 and increments it,
     starting from INV000001.
     """
-    import re
-
     existing_ids = Investigation.objects.filter(
         investigation_id__startswith='INV'
     ).values_list('investigation_id', flat=True)
@@ -320,7 +376,7 @@ class Investigation(models.Model):
 
     artifact_folder = models.CharField(max_length=255, blank=True, default="")
 
-    # Document-style embedded timeline (JSONB in PostgreSQL / JSON in SQLite)
+    # Document-style embedded timeline (JSONB in PostgreSQL)
     # Stored as an array of event objects: [{ id, timestamp, summary, mitre: [...], pcaps: [...], screenshots: [...] }]
     timeline_events = models.JSONField(default=list, blank=True)
 
@@ -358,6 +414,18 @@ class Investigation(models.Model):
         Ensures a dedicated folder exists on disk for storing form-submitted evidence
         (screenshots, pcaps, generated reports) during the investigation phase and for archive purposes.
         """
+        artifacts_root = Path(settings.ARTIFACTS_ROOT).resolve()
+        if self.artifact_folder:
+            safe_existing = re.sub(
+                r'[^A-Za-z0-9._-]+',
+                '_',
+                os.path.basename(str(self.artifact_folder).replace("\\", "/")),
+            ).strip('._')
+            if safe_existing != self.artifact_folder:
+                self.artifact_folder = safe_existing
+                if self.pk:
+                    Investigation.objects.filter(pk=self.pk).update(artifact_folder=self.artifact_folder)
+
         if not self.artifact_folder and self.pk:
             cust_slug = slugify(self.customer.name if self.customer_id and self.customer else "incident")[:25]
             title_slug = slugify(self.title or "investigation")[:30]
@@ -365,7 +433,10 @@ class Investigation(models.Model):
             Investigation.objects.filter(pk=self.pk).update(artifact_folder=self.artifact_folder)
 
         folder_name = self.artifact_folder or "investigation_unassigned"
-        base_path = Path(settings.ARTIFACTS_ROOT) / folder_name
+        base_path = (artifacts_root / folder_name).resolve()
+        if base_path.parent != artifacts_root:
+            folder_name = f"investigation_{self.pk}" if self.pk else "investigation_unassigned"
+            base_path = (artifacts_root / folder_name).resolve()
         (base_path / "screenshots").mkdir(parents=True, exist_ok=True)
         (base_path / "pcaps").mkdir(parents=True, exist_ok=True)
         (base_path / "reports").mkdir(parents=True, exist_ok=True)
@@ -375,7 +446,14 @@ class Investigation(models.Model):
     def artifact_folder_absolute_path(self) -> str:
         if not self.artifact_folder:
             return ""
-        return str((Path(settings.ARTIFACTS_ROOT) / self.artifact_folder).resolve())
+        artifacts_root = Path(settings.ARTIFACTS_ROOT).resolve()
+        safe_folder = os.path.basename(str(self.artifact_folder).replace("\\", "/"))
+        if not safe_folder or safe_folder in {".", ".."}:
+            return ""
+        resolved = (artifacts_root / safe_folder).resolve()
+        if resolved.parent != artifacts_root:
+            return ""
+        return str(resolved)
 
     def get_timeline_evidence(self):
         return (
@@ -511,10 +589,15 @@ class Investigation(models.Model):
             pass
 
     def save(self, *args, **kwargs):
+        if self.investigation_id:
+            cleaned_inv_id = re.sub(
+                r'[^A-Z0-9_-]+',
+                '',
+                str(self.investigation_id).strip().upper(),
+            )[:32]
+            self.investigation_id = cleaned_inv_id
         if not self.investigation_id:
             self.investigation_id = generate_next_investigation_id()
-        else:
-            self.investigation_id = str(self.investigation_id).strip().upper()
 
         if not self.customer_id:
             default_cust, _ = Customer.objects.get_or_create(
@@ -540,12 +623,20 @@ class Investigation(models.Model):
                 analyst_name=self.lead_analyst or "Analyst",
             )
         self.get_or_create_artifact_folder()
-        self.sync_archive_manifest()
+        if not getattr(self, '_skip_manifest_sync', False):
+            self.sync_archive_manifest()
 
     def delete(self, *args, **kwargs):
-        folder_name = (self.artifact_folder or "").strip()
-        result = super().delete(*args, **kwargs)
-        if folder_name:
+        inv_pk = self.pk
+        folder_name = os.path.basename((self.artifact_folder or "").strip().replace("\\", "/"))
+        if inv_pk:
+            _DELETING_INVESTIGATION_IDS.add(inv_pk)
+        try:
+            result = super().delete(*args, **kwargs)
+        finally:
+            if inv_pk:
+                _DELETING_INVESTIGATION_IDS.discard(inv_pk)
+        if folder_name and folder_name not in {".", ".."}:
             artifacts_root = Path(settings.ARTIFACTS_ROOT).resolve()
             target_dir = (artifacts_root / folder_name).resolve()
             if target_dir.parent == artifacts_root and target_dir.exists():
@@ -754,19 +845,41 @@ class EvidencePcap(models.Model):
 @receiver(post_save, sender=EvidenceItem)
 @receiver(post_delete, sender=EvidenceItem)
 def _on_evidence_item_changed(sender, instance, **kwargs):
-    if instance.investigation_id:
-        instance.investigation.sync_timeline_events()
+    if is_timeline_sync_suppressed() or getattr(instance, '_skip_timeline_sync', False):
+        return
+    inv_id = instance.investigation_id
+    if inv_id and inv_id not in _DELETING_INVESTIGATION_IDS:
+        try:
+            instance.investigation.sync_timeline_events()
+        except Investigation.DoesNotExist:
+            pass
 
 
 @receiver(post_save, sender=EvidenceScreenshot)
 @receiver(post_delete, sender=EvidenceScreenshot)
 def _on_screenshot_changed(sender, instance, **kwargs):
-    if instance.evidence_id and instance.evidence and instance.evidence.investigation_id:
-        instance.evidence.investigation.sync_timeline_events()
+    if is_timeline_sync_suppressed() or getattr(instance, '_skip_timeline_sync', False):
+        return
+    if not instance.evidence_id:
+        return
+    try:
+        ev = instance.evidence
+        if ev and ev.investigation_id and ev.investigation_id not in _DELETING_INVESTIGATION_IDS:
+            ev.investigation.sync_timeline_events()
+    except (EvidenceItem.DoesNotExist, Investigation.DoesNotExist):
+        pass
 
 
 @receiver(post_save, sender=EvidencePcap)
 @receiver(post_delete, sender=EvidencePcap)
 def _on_pcap_changed(sender, instance, **kwargs):
-    if instance.evidence_id and instance.evidence and instance.evidence.investigation_id:
-        instance.evidence.investigation.sync_timeline_events()
+    if is_timeline_sync_suppressed() or getattr(instance, '_skip_timeline_sync', False):
+        return
+    if not instance.evidence_id:
+        return
+    try:
+        ev = instance.evidence
+        if ev and ev.investigation_id and ev.investigation_id not in _DELETING_INVESTIGATION_IDS:
+            ev.investigation.sync_timeline_events()
+    except (EvidenceItem.DoesNotExist, Investigation.DoesNotExist):
+        pass

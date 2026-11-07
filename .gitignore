@@ -9,12 +9,6 @@ backend/.venv/
 venv/
 ENV/
 env/
-backend/db.sqlite3
-db.sqlite3
-*.sqlite3
-*.sqlite3-journal
-*.sqlite3-wal
-*.sqlite3-shm
 backend/staticfiles/
 
 # Node / React / Vite
@@ -28,8 +22,6 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # Mapped Docker Database & Investigation Artifacts (keep folders, ignore local data)
-data/db/*
-!data/db/.gitkeep
 data/postgres/*
 !data/postgres/.gitkeep
 artifacts/*

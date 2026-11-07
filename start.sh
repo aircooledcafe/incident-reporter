@@ -16,20 +16,21 @@ if [ -z "${DJANGO_SECRET_KEY}" ]; then
   exit 1
 fi
 
-# If POSTGRES_DB is configured in .env, check if a PostgreSQL instance is accessible on host
-if [ -n "${POSTGRES_DB}" ]; then
-  PG_CHECK_HOST="${POSTGRES_HOST:-localhost}"
-  if [ "$PG_CHECK_HOST" = "postgres" ]; then
-    PG_CHECK_HOST="localhost"
-    export POSTGRES_HOST="localhost"
-  fi
-  if ! nc -z "$PG_CHECK_HOST" "${POSTGRES_PORT:-5432}" 2>/dev/null; then
-    echo "[start.sh] Note: PostgreSQL is not reachable at $PG_CHECK_HOST:${POSTGRES_PORT:-5432}."
-    echo "[start.sh] To run with PostgreSQL via Docker Compose, use:"
-    echo "           docker compose up --build -d"
-    echo "[start.sh] Temporarily using local SQLite fallback for this host process..."
-    unset POSTGRES_DB
-  fi
+# Verify PostgreSQL is configured and reachable
+if [ -z "${POSTGRES_DB}" ]; then
+  echo "ERROR: POSTGRES_DB is not set in .env." >&2
+  exit 1
+fi
+
+PG_CHECK_HOST="${POSTGRES_HOST:-localhost}"
+if [ "$PG_CHECK_HOST" = "postgres" ]; then
+  PG_CHECK_HOST="localhost"
+  export POSTGRES_HOST="localhost"
+fi
+if ! nc -z "$PG_CHECK_HOST" "${POSTGRES_PORT:-5432}" 2>/dev/null; then
+  echo "ERROR: PostgreSQL is not reachable at $PG_CHECK_HOST:${POSTGRES_PORT:-5432}." >&2
+  echo "Start PostgreSQL or launch the full stack with: docker compose up --build -d" >&2
+  exit 1
 fi
 
 echo "Applying Django migrations & checking optional initial Super Admin..."

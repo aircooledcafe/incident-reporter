@@ -1,5 +1,7 @@
+from pathlib import Path
 from django.db import transaction
-from django.http import HttpResponse
+from django.db.models import Count, Q
+from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -21,6 +23,8 @@ from .models import (
     EvidenceScreenshot,
     EvidencePcap,
     get_user_display_name,
+    is_valid_pk_int,
+    suppress_timeline_sync,
 )
 from .permissions import (
     CustomerAccessPermission,
@@ -52,24 +56,59 @@ from .reports import (
 )
 
 
+def _clean_query_str(value) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("\x00", "").strip()
+
+
+def _filter_by_customer_param(qs, cust_param, fk_field: str = "customer_id", code_lookup: str = "customer__customer_id__iexact"):
+    cust_str = _clean_query_str(cust_param)
+    if not cust_str:
+        return qs
+    if is_valid_pk_int(cust_str):
+        return qs.filter(Q(**{fk_field: int(cust_str)}) | Q(**{code_lookup: cust_str}))
+    return qs.filter(**{code_lookup: cust_str})
+
+
+def _filter_by_investigation_param(qs, inv_param):
+    inv_str = _clean_query_str(inv_param)
+    if not inv_str:
+        return qs
+    if is_valid_pk_int(inv_str):
+        return qs.filter(
+            Q(investigation_id=int(inv_str)) |
+            Q(investigation__investigation_id__iexact=inv_str)
+        )
+    return qs.filter(investigation__investigation_id__iexact=inv_str)
+
+
+def _safe_header_filename(raw_name: str, fallback: str = "download.bin") -> str:
+    name = Path(raw_name or "").name
+    cleaned = "".join(ch for ch in name if ch >= " " and ch not in ('"', "\\", "\x7f")).strip()
+    return cleaned or fallback
+
+
 class CustomerViewSet(viewsets.ModelViewSet):
     """
     CRUD API for Customer entities and directory management.
     """
     queryset = (
-        Customer.objects.prefetch_related('contacts', 'investigations')
+        Customer.objects.annotate(investigations_count_val=Count('investigations', distinct=True))
+        .prefetch_related('contacts')
         .all()
     )
     serializer_class = CustomerSerializer
     permission_classes = [CustomerAccessPermission]
 
     def get_object(self):
-        from django.http import Http404
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = str(self.kwargs.get(lookup_url_kwarg, '')).strip()
+        lookup_value = _clean_query_str(self.kwargs.get(lookup_url_kwarg, ''))
+        if not lookup_value:
+            raise Http404("No Customer specified.")
         queryset = self.filter_queryset(self.get_queryset())
         obj = queryset.filter(customer_id__iexact=lookup_value).first()
-        if not obj and lookup_value.isdigit():
+        if not obj and is_valid_pk_int(lookup_value):
             obj = queryset.filter(pk=int(lookup_value)).first()
         if not obj:
             raise Http404(f"No Customer found matching '{lookup_value}'.")
@@ -77,9 +116,10 @@ class CustomerViewSet(viewsets.ModelViewSet):
         return obj
 
     def perform_destroy(self, instance):
-        if instance.investigations.exists():
+        inv_count = instance.investigations.count()
+        if inv_count > 0:
             raise PermissionDenied(
-                f"Cannot delete customer '{instance.name}' because it has {instance.investigations.count()} associated investigation(s). "
+                f"Cannot delete customer '{instance.name}' because it has {inv_count} associated investigation(s). "
                 f"Reassign or delete the investigations first."
             )
         instance.delete()
@@ -87,7 +127,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def investigations(self, request, pk=None):
         customer = self.get_object()
-        invs = customer.investigations.all()
+        invs = InvestigationViewSet.queryset.filter(customer=customer)
         serializer = InvestigationSerializer(invs, many=True, context={'request': request})
         return Response(serializer.data)
 
@@ -101,15 +141,10 @@ class CustomerContactViewSet(viewsets.ModelViewSet):
     permission_classes = [CustomerAccessPermission]
 
     def get_queryset(self):
-        from django.db.models import Q
         qs = super().get_queryset()
         customer_id = self.request.query_params.get('customer') or self.request.query_params.get('customer_id')
         if customer_id:
-            c_str = str(customer_id).strip()
-            if c_str.isdigit():
-                qs = qs.filter(Q(customer_id=int(c_str)) | Q(customer__customer_id__iexact=c_str))
-            else:
-                qs = qs.filter(customer__customer_id__iexact=c_str)
+            qs = _filter_by_customer_param(qs, customer_id)
         return qs
 
     def perform_create(self, serializer):
@@ -133,19 +168,27 @@ class CustomerContactViewSet(viewsets.ModelViewSet):
 class InvestigationViewSet(viewsets.ModelViewSet):
     queryset = (
         Investigation.objects.select_related('locked_by', 'customer', 'lead_analyst_user')
-        .prefetch_related('customer__contacts', 'related_incidents', 'external_research_items')
+        .prefetch_related(
+            'customer__contacts',
+            'related_incidents',
+            'external_research_items',
+            'evidence_items__created_by',
+            'evidence_items__screenshots__created_by',
+            'evidence_items__pcaps__created_by',
+        )
         .all()
     )
     serializer_class = InvestigationSerializer
     permission_classes = [InvestigationAccessPermission]
 
     def get_object(self):
-        from django.http import Http404
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = str(self.kwargs.get(lookup_url_kwarg, '')).strip()
+        lookup_value = _clean_query_str(self.kwargs.get(lookup_url_kwarg, ''))
+        if not lookup_value:
+            raise Http404("No Investigation specified.")
         queryset = self.filter_queryset(self.get_queryset())
         obj = queryset.filter(investigation_id__iexact=lookup_value).first()
-        if not obj and lookup_value.isdigit():
+        if not obj and is_valid_pk_int(lookup_value):
             obj = queryset.filter(pk=int(lookup_value)).first()
         if not obj:
             raise Http404(f"No Investigation found matching '{lookup_value}'.")
@@ -153,21 +196,18 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         return obj
 
     def get_queryset(self):
-        from django.db.models import Q
         qs = super().get_queryset()
         cust_param = self.request.query_params.get('customer') or self.request.query_params.get('customer_id')
         if cust_param:
-            cust_str = str(cust_param).strip()
-            if cust_str.isdigit():
-                qs = qs.filter(Q(customer_id=int(cust_str)) | Q(customer__customer_id__iexact=cust_str))
-            else:
-                qs = qs.filter(customer__customer_id__iexact=cust_str)
-        status_param = self.request.query_params.get('status')
+            qs = _filter_by_customer_param(qs, cust_param)
+        status_param = _clean_query_str(self.request.query_params.get('status'))
         if status_param:
             qs = qs.filter(status=status_param.upper())
         inv_code = self.request.query_params.get('investigation_id') or self.request.query_params.get('code')
         if inv_code:
-            qs = qs.filter(investigation_id__iexact=str(inv_code).strip())
+            cleaned_code = _clean_query_str(inv_code)
+            if cleaned_code:
+                qs = qs.filter(investigation_id__iexact=cleaned_code)
         return qs
 
     def perform_create(self, serializer):
@@ -182,11 +222,20 @@ class InvestigationViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         assert_project_unlocked(serializer.instance)
+        save_kwargs = {}
+        has_lead_str = 'lead_analyst' in serializer.validated_data
+        has_lead_user = 'lead_analyst_user' in serializer.validated_data
         lead = (serializer.validated_data.get('lead_analyst') or '').strip()
-        lead_user = serializer.validated_data.get('lead_analyst_user')
-        if lead_user and not lead:
-            lead = get_user_display_name(lead_user)
-        instance = serializer.save(lead_analyst=lead) if lead else serializer.save()
+        lead_user = (
+            serializer.validated_data['lead_analyst_user']
+            if has_lead_user
+            else serializer.instance.lead_analyst_user
+        )
+        if lead_user and ((has_lead_str and not lead) or (has_lead_user and not lead) or not (lead or serializer.instance.lead_analyst)):
+            save_kwargs['lead_analyst'] = get_user_display_name(lead_user)
+        elif has_lead_str:
+            save_kwargs['lead_analyst'] = lead
+        instance = serializer.save(**save_kwargs)
         instance.sync_timeline_events()
 
     def perform_destroy(self, instance):
@@ -267,10 +316,10 @@ class InvestigationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def seed_demo(self, request):
         """
-        Super Admin-only endpoint to create one of the 4 themed sample SOC Investigation Response
-        scenarios ('expanse', 'star_trek', 'matrix', 'star_wars', or 'all').
+        Super Admin-only endpoint to create one of the 5 themed sample SOC Investigation Response
+        scenarios ('expanse', 'star_trek', 'matrix', 'star_wars', 'god_of_war', or 'all').
         """
-        scenario_key = request.data.get('scenario') or 'expanse'
+        scenario_key = _clean_query_str(request.data.get('scenario')) or 'expanse'
         try:
             created = create_demo_scenario(scenario_key)
         except ValueError as exc:
@@ -319,7 +368,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         files = self.request.FILES.getlist('screenshots_upload')
         captions = self.request.data.getlist('screenshot_captions') if hasattr(self.request.data, 'getlist') else []
         for idx, img_file in enumerate(files):
-            caption = captions[idx] if idx < len(captions) else ""
+            caption = (captions[idx] if idx < len(captions) else "").replace("\x00", "")
             EvidenceScreenshot.objects.create(
                 evidence=instance,
                 image=img_file,
@@ -331,7 +380,7 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         pcap_files = self.request.FILES.getlist('pcaps_upload')
         pcap_descriptions = self.request.data.getlist('pcap_descriptions') if hasattr(self.request.data, 'getlist') else []
         for idx, pcap_file in enumerate(pcap_files):
-            desc = pcap_descriptions[idx] if idx < len(pcap_descriptions) else ""
+            desc = (pcap_descriptions[idx] if idx < len(pcap_descriptions) else "").replace("\x00", "")
             EvidencePcap.objects.create(
                 evidence=instance,
                 file=pcap_file,
@@ -341,7 +390,6 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
             )
 
     def get_queryset(self):
-        from django.db.models import Q
         qs = super().get_queryset()
         investigation_id = (
             self.request.query_params.get('investigation')
@@ -349,18 +397,11 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
             or self.request.query_params.get('project')
         )
         if investigation_id:
-            inv_str = str(investigation_id).strip()
-            if inv_str.isdigit():
-                qs = qs.filter(
-                    Q(investigation_id=int(inv_str)) |
-                    Q(investigation__investigation_id__iexact=inv_str)
-                )
-            else:
-                qs = qs.filter(investigation__investigation_id__iexact=inv_str)
+            qs = _filter_by_investigation_param(qs, investigation_id)
 
         key_only = self.request.query_params.get('is_key_evidence')
         if key_only is not None:
-            qs = qs.filter(is_key_evidence=key_only.lower() in ('1', 'true'))
+            qs = qs.filter(is_key_evidence=_clean_query_str(key_only).lower() in ('1', 'true'))
         return qs
 
     def perform_create(self, serializer):
@@ -369,16 +410,21 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         analyst = (serializer.validated_data.get('analyst_name') or '').strip()
         if not analyst:
             analyst = get_user_display_name(self.request.user)
-        instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
-        self._save_uploaded_attachments(instance)
+        with suppress_timeline_sync():
+            instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
+            self._save_uploaded_attachments(instance)
         instance.investigation.sync_timeline_events()
 
     def perform_update(self, serializer):
-        assert_project_unlocked(serializer.instance.investigation)
+        old_inv = serializer.instance.investigation
+        assert_project_unlocked(old_inv)
         if 'investigation' in serializer.validated_data:
             assert_project_unlocked(serializer.validated_data['investigation'])
-        instance = serializer.save()
-        self._save_uploaded_attachments(instance)
+        with suppress_timeline_sync():
+            instance = serializer.save()
+            self._save_uploaded_attachments(instance)
+        if old_inv.pk != instance.investigation_id:
+            old_inv.sync_timeline_events()
         instance.investigation.sync_timeline_events()
 
     def perform_destroy(self, instance):
@@ -386,7 +432,6 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         assert_project_unlocked(inv)
         assert_can_delete_evidence_item(self.request.user, instance)
         instance.delete()
-        inv.sync_timeline_events()
 
     @action(detail=True, methods=['post'])
     def toggle_key(self, request, pk=None):
@@ -394,7 +439,6 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         assert_project_unlocked(item.investigation)
         item.is_key_evidence = not item.is_key_evidence
         item.save(update_fields=['is_key_evidence', 'updated_at'])
-        item.investigation.sync_timeline_events()
         return Response(self.get_serializer(item).data)
 
     @action(detail=False, methods=['post'], url_path='bulk_create')
@@ -465,9 +509,9 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
             item_data['investigation'] = inv_id
 
             if inv_id not in investigations_cache:
-                inv_str = str(inv_id).strip()
-                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
-                if not inv_obj and inv_str.isdigit():
+                inv_str = _clean_query_str(inv_id)
+                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first() if inv_str else None
+                if not inv_obj and is_valid_pk_int(inv_str):
                     inv_obj = Investigation.objects.filter(pk=int(inv_str)).first()
                 if not inv_obj:
                     errors.append({
@@ -507,13 +551,14 @@ class EvidenceItemViewSet(viewsets.ModelViewSet):
         investigations_to_sync = set()
 
         with transaction.atomic():
-            for serializer, inv_obj in validated_serializers:
-                analyst = (serializer.validated_data.get('analyst_name') or '').strip()
-                if not analyst:
-                    analyst = default_analyst
-                instance = serializer.save(analyst_name=analyst, created_by=request.user)
-                created_instances.append(instance)
-                investigations_to_sync.add(inv_obj)
+            with suppress_timeline_sync():
+                for serializer, inv_obj in validated_serializers:
+                    analyst = (serializer.validated_data.get('analyst_name') or '').strip()
+                    if not analyst:
+                        analyst = default_analyst
+                    instance = serializer.save(analyst_name=analyst, created_by=request.user)
+                    created_instances.append(instance)
+                    investigations_to_sync.add(inv_obj)
 
             for inv in investigations_to_sync:
                 inv.sync_timeline_events()
@@ -546,7 +591,7 @@ class RelatedIncidentViewSet(viewsets.ModelViewSet):
             or self.request.query_params.get('project')
         )
         if inv_id:
-            qs = qs.filter(investigation_id=inv_id)
+            qs = _filter_by_investigation_param(qs, inv_id)
         return qs
 
     def perform_create(self, serializer):
@@ -585,7 +630,7 @@ class ExternalResearchViewSet(viewsets.ModelViewSet):
             or self.request.query_params.get('project')
         )
         if inv_id:
-            qs = qs.filter(investigation_id=inv_id)
+            qs = _filter_by_investigation_param(qs, inv_id)
         return qs
 
     def perform_create(self, serializer):
@@ -626,22 +671,22 @@ class EvidenceScreenshotViewSet(viewsets.ModelViewSet):
         analyst = (serializer.validated_data.get('analyst_name') or '').strip()
         if not analyst:
             analyst = get_user_display_name(self.request.user)
-        instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
-        instance.evidence.investigation.sync_timeline_events()
+        serializer.save(analyst_name=analyst, created_by=self.request.user)
 
     def perform_update(self, serializer):
-        assert_project_unlocked(serializer.instance.evidence.investigation)
+        old_inv = serializer.instance.evidence.investigation
+        assert_project_unlocked(old_inv)
         if 'evidence' in serializer.validated_data:
             assert_project_unlocked(serializer.validated_data['evidence'].investigation)
         instance = serializer.save()
-        instance.evidence.investigation.sync_timeline_events()
+        if old_inv.pk != instance.evidence.investigation_id:
+            old_inv.sync_timeline_events()
 
     def perform_destroy(self, instance):
         inv = instance.evidence.investigation
         assert_project_unlocked(inv)
         assert_can_delete_screenshot(self.request.user, instance)
         instance.delete()
-        inv.sync_timeline_events()
 
 
 class EvidencePcapViewSet(viewsets.ModelViewSet):
@@ -659,30 +704,33 @@ class EvidencePcapViewSet(viewsets.ModelViewSet):
         analyst = (serializer.validated_data.get('analyst_name') or '').strip()
         if not analyst:
             analyst = get_user_display_name(self.request.user)
-        instance = serializer.save(analyst_name=analyst, created_by=self.request.user)
-        instance.evidence.investigation.sync_timeline_events()
+        serializer.save(analyst_name=analyst, created_by=self.request.user)
 
     def perform_update(self, serializer):
-        assert_project_unlocked(serializer.instance.evidence.investigation)
+        old_inv = serializer.instance.evidence.investigation
+        assert_project_unlocked(old_inv)
         if 'evidence' in serializer.validated_data:
             assert_project_unlocked(serializer.validated_data['evidence'].investigation)
         instance = serializer.save()
-        instance.evidence.investigation.sync_timeline_events()
+        if old_inv.pk != instance.evidence.investigation_id:
+            old_inv.sync_timeline_events()
 
     def perform_destroy(self, instance):
         inv = instance.evidence.investigation
         assert_project_unlocked(inv)
         assert_can_delete_pcap(self.request.user, instance)
         instance.delete()
-        inv.sync_timeline_events()
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        if request.query_params.get('download') in ('1', 'true'):
-            if not instance.file:
+        if _clean_query_str(request.query_params.get('download')).lower() in ('1', 'true'):
+            if not instance.file or not instance.file.storage.exists(instance.file.name):
                 return Response({'error': 'No file available'}, status=status.HTTP_404_NOT_FOUND)
-            response = HttpResponse(instance.file.read(), content_type='application/vnd.tcpdump.pcap')
-            filename = instance.file.name.split('/')[-1]
+            filename = _safe_header_filename(instance.file.name, fallback='capture.pcap')
+            response = FileResponse(
+                instance.file.open('rb'),
+                content_type='application/vnd.tcpdump.pcap',
+            )
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
             return response
         serializer = self.get_serializer(instance)
@@ -718,12 +766,15 @@ class SOCIngestAPIView(APIView):
 
         inv = None
         if inv_id:
-            inv_str = str(inv_id).strip()
-            inv = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
-            if not inv and inv_str.isdigit():
-                inv = Investigation.objects.filter(pk=int(inv_str)).first()
+            inv_str = _clean_query_str(inv_id)
+            if inv_str:
+                inv = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
+                if not inv and is_valid_pk_int(inv_str):
+                    inv = Investigation.objects.filter(pk=int(inv_str)).first()
         elif ticket_id:
-            inv = Investigation.objects.filter(ticket_id__iexact=str(ticket_id).strip()).order_by('-updated_at').first()
+            cleaned_ticket = _clean_query_str(ticket_id)
+            if cleaned_ticket:
+                inv = Investigation.objects.filter(ticket_id__iexact=cleaned_ticket).order_by('-updated_at').first()
 
         if not inv:
             return Response(
@@ -740,7 +791,6 @@ class SOCIngestAPIView(APIView):
         serializer = EvidenceItemSerializer(data=payload, context={'request': request})
         serializer.is_valid(raise_exception=True)
         item = serializer.save(created_by=request.user)
-        inv.sync_timeline_events()
         return Response(
             EvidenceItemSerializer(item, context={'request': request}).data,
             status=status.HTTP_201_CREATED,

@@ -142,7 +142,7 @@ No credentials or secrets are hardcoded in the codebase. You can create the firs
 
 ## Database Structure Overview
 
-All relational data—including Django's built-in user accounts, role profiles, active sessions, API tokens, projects, lock metadata, research links, timeline evidence, and screenshot references—is stored in the configured database (`DJANGO_DB_PATH`), while binary screenshots, exported reports, and JSON archive manifests are persisted in `DJANGO_ARTIFACTS_ROOT`.
+All relational data—including Django's built-in user accounts, role profiles, active sessions, API tokens, customers, investigations, lock metadata, research links, timeline evidence, and attachment references—is stored in PostgreSQL (`POSTGRES_DB`), while binary screenshots, PCAPs, exported reports, and JSON archive manifests are persisted in `DJANGO_ARTIFACTS_ROOT`.
 
 ```mermaid
 erDiagram
@@ -386,8 +386,8 @@ To completely wipe previous data and start fresh as a brand new instance:
 # 1. Stop existing containers and remove the old database volume
 docker compose down -v
 
-# 2. (Optional) Clear old investigation artifacts if starting completely fresh
-rm -rf ./artifacts/* ./data/db/*
+# 2. (Optional) Clear old investigation artifacts and PostgreSQL host directory if starting completely fresh
+rm -rf ./artifacts/* ./data/postgres/*
 
 # 3. Rebuild and launch the new PostgreSQL stack
 docker compose up -d --build

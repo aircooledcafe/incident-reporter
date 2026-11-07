@@ -8,6 +8,7 @@ import {
   ArrowUpDown,
   Sparkles,
 } from 'lucide-react';
+import { safeHref } from './api';
 
 const STATUS_LABELS = {
   OPEN: 'Triage',
@@ -15,6 +16,17 @@ const STATUS_LABELS = {
   AWAITING_CUSTOMER: 'Awaiting Customer',
   CONTAINED: 'Contained',
   ARCHIVED: 'Closed',
+};
+
+const FILTER_LABELS = {
+  open: 'open',
+  all: '',
+  OPEN: 'triage',
+  INVESTIGATING: 'investigating',
+  AWAITING_CUSTOMER: 'awaiting-customer',
+  CONTAINED: 'contained',
+  archived: 'closed',
+  locked: 'locked',
 };
 
 function formatUtcShort(isoString) {
@@ -195,10 +207,10 @@ export default function HomeDashboard({
         <Card className="soc-card text-center py-5">
           <Card.Body>
             <h6 className="text-white mb-2">
-              No {viewFilter === 'all' ? '' : viewFilter} investigations match the current filter.
+              No {FILTER_LABELS[viewFilter] ? `${FILTER_LABELS[viewFilter]} ` : ''}investigations match the current filter.
             </h6>
             <p className="text-secondary small mb-3">
-              Switch filter toggles above{canEditRole ? ' or start a new investigation.' : '.'}
+              Change the filter selection above{canEditRole ? ' or start a new investigation.' : '.'}
             </p>
             <div className="d-flex flex-wrap justify-content-center gap-2">
               {viewFilter !== 'all' && projects.length > 0 && (
@@ -219,7 +231,7 @@ export default function HomeDashboard({
                   onClick={() => onSeedDemoScenario('all')}
                 >
                   <Sparkles size={14} className="me-1" />
-                  Load All 4 Demo Investigations
+                  Load All {demoScenarios.length} Demo Investigations
                 </Button>
               )}
             </div>
@@ -288,11 +300,11 @@ export default function HomeDashboard({
 
                     <span>
                       Ticket:{' '}
-                      {project.ticket_link ? (
+                      {safeHref(project.ticket_link) ? (
                         <a
-                          href={project.ticket_link}
+                          href={safeHref(project.ticket_link)}
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           className="text-lb-cyan mono-text text-decoration-none"
                         >
@@ -316,18 +328,28 @@ export default function HomeDashboard({
               {project.related_incidents && project.related_incidents.length > 0 && (
                 <div className="mb-3 d-flex flex-wrap align-items-center gap-2 small">
                   <span className="text-secondary">Related Escalations:</span>
-                  {project.related_incidents.map((rel) => (
-                    <a
-                      key={rel.id}
-                      href={rel.link}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="badge bg-dark border border-secondary text-lb-cyan text-decoration-none fw-normal py-1 px-2"
-                    >
-                      {rel.title} <ExternalLink size={11} className="ms-1" />
-                    </a>
-                  ))}
+                  {project.related_incidents.map((rel) => {
+                    const relHref = safeHref(rel.link);
+                    return relHref ? (
+                      <a
+                        key={rel.id}
+                        href={relHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="badge bg-dark border border-secondary text-lb-cyan text-decoration-none fw-normal py-1 px-2"
+                      >
+                        {rel.title} <ExternalLink size={11} className="ms-1" />
+                      </a>
+                    ) : (
+                      <span
+                        key={rel.id}
+                        className="badge bg-dark border border-secondary text-light fw-normal py-1 px-2"
+                      >
+                        {rel.title}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
 

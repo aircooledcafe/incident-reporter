@@ -1424,4 +1424,429 @@ class IncidentReporterTests(TestCase):
         )
         self.assertEqual(soc_res.status_code, 201)
 
+    def test_status_labels_awaiting_customer_and_filtering(self):
+        self.client.force_authenticate(user=self.analyst_user)
+        expected_labels = {
+            "OPEN": "Triage",
+            "INVESTIGATING": "Investigating",
+            "AWAITING_CUSTOMER": "Awaiting Customer",
+            "CONTAINED": "Contained",
+            "ARCHIVED": "Closed",
+        }
+        self.assertEqual(dict(Investigation.STATUS_CHOICES), expected_labels)
+        created_by_status = {}
+        for status_code, expected_label in expected_labels.items():
+            res = self.client.post(
+                "/api/investigations/",
+                {
+                    "title": f"Status Check {status_code}",
+                    "customer_name": "Status Test Corp",
+                    "customer_id": "CUST-STATUS-01",
+                    "status": status_code,
+                },
+                format="json",
+            )
+            self.assertEqual(res.status_code, 201)
+            body = res.json()
+            self.assertEqual(body["status"], status_code)
+            self.assertEqual(body["status_display"], expected_label)
+            created_by_status[status_code] = body["id"]
+
+        # Case-insensitive status filtering via query param
+        awaiting_res = self.client.get("/api/investigations/?status=awaiting_customer")
+        self.assertEqual(awaiting_res.status_code, 200)
+        awaiting_ids = [item["id"] for item in awaiting_res.json()]
+        self.assertEqual(awaiting_ids, [created_by_status["AWAITING_CUSTOMER"]])
+
+        # Removed / invalid status codes ('CLOSED', 'DRAFT') must be rejected cleanly
+        for invalid_status in ("CLOSED", "DRAFT", "INVALID_STATUS"):
+            bad_res = self.client.patch(
+                f"/api/investigations/{created_by_status['OPEN']}/",
+                {"status": invalid_status},
+                format="json",
+            )
+            self.assertEqual(bad_res.status_code, 400)
+
+    def test_customer_contacts_minimal_crm_schema_and_tier_ordering(self):
+        self.client.force_authenticate(user=self.analyst_user)
+        cust_res = self.client.post(
+            "/api/customers/",
+            {"name": "Minimal Contact Corp", "customer_id": "CUST-MIN-01"},
+            format="json",
+        )
+        self.assertEqual(cust_res.status_code, 201)
+        cust_pk = cust_res.json()["id"]
+
+        # Create contacts out of order (Tertiary, Primary, Secondary) to test ordering
+        for name, tier in [
+            ("Tertiary Responder", "TERTIARY"),
+            ("Primary Commander", "PRIMARY"),
+            ("Secondary Lead", "SECONDARY"),
+        ]:
+            c_res = self.client.post(
+                "/api/customer-contacts/",
+                {
+                    "customer": cust_pk,
+                    "name": name,
+                    "escalation_tier": tier,
+                    "notes": f"{tier} bridge contact",
+                    # Extra legacy CRM fields if sent by an external client should be ignored and not stored
+                    "email": "ignored@example.com",
+                    "phone": "+1-555-0000",
+                    "role_title": "Ignored Role",
+                },
+                format="json",
+            )
+            self.assertEqual(c_res.status_code, 201)
+            c_body = c_res.json()
+            for removed_field in ("email", "phone", "role_title"):
+                self.assertNotIn(removed_field, c_body)
+
+        model_field_names = {f.name for f in CustomerContact._meta.get_fields()}
+        for removed_field in ("email", "phone", "role_title"):
+            self.assertNotIn(removed_field, model_field_names)
+
+        # Verify ?customer= filtering works by both customer_id code and numeric PK, ordered by tier
+        by_code = self.client.get("/api/customer-contacts/?customer=CUST-MIN-01")
+        self.assertEqual(by_code.status_code, 200)
+        tiers = [c["escalation_tier"] for c in by_code.json()]
+        self.assertEqual(tiers, ["PRIMARY", "SECONDARY", "TERTIARY"])
+
+        by_pk = self.client.get(f"/api/customer-contacts/?customer={cust_pk}")
+        self.assertEqual(by_pk.status_code, 200)
+        self.assertEqual(len(by_pk.json()), 3)
+
+    def test_edit_investigation_with_empty_string_foreign_keys_and_lead_analyst_clear(self):
+        self.client.force_authenticate(user=self.analyst_user)
+        inv_res = self.client.post(
+            "/api/investigations/",
+            {
+                "title": "Nullable FK Edit Test",
+                "customer_name": "Nullable FK Corp",
+                "customer_id": "CUST-NULLFK-01",
+                "lead_analyst_user": self.analyst_user.id,
+            },
+            format="json",
+        )
+        self.assertEqual(inv_res.status_code, 201)
+        inv_id = inv_res.json()["id"]
+        self.assertEqual(inv_res.json()["lead_analyst"], "James Holden")
+
+        # Simulate React form sending empty strings "" for cleared FK fields in JSON
+        patch_clear = self.client.patch(
+            f"/api/investigations/{inv_id}/",
+            {
+                "title": "Nullable FK Cleared",
+                "lead_analyst_user": "",
+                "lead_analyst": "",
+                "customer": "",
+            },
+            format="json",
+        )
+        self.assertEqual(patch_clear.status_code, 200)
+        self.assertIsNone(patch_clear.json()["lead_analyst_user"])
+        self.assertEqual(patch_clear.json()["lead_analyst"], "")
+
+        # Selecting a new lead_analyst_user with blank lead_analyst auto-populates display name
+        patch_reassign = self.client.patch(
+            f"/api/investigations/{inv_id}/",
+            {
+                "lead_analyst_user": self.admin_user.id,
+                "lead_analyst": "",
+            },
+            format="json",
+        )
+        self.assertEqual(patch_reassign.status_code, 200)
+        self.assertEqual(patch_reassign.json()["lead_analyst_user"], self.admin_user.id)
+        self.assertEqual(patch_reassign.json()["lead_analyst"], "Camina Drummer")
+
+    def test_sql_injection_overflow_unicode_and_nul_byte_resilience(self):
+        self.client.force_authenticate(user=self.analyst_user)
+        inv_res = self.client.post(
+            "/api/investigations/",
+            {
+                "title": "Sanitization Target\x00Title",
+                "customer_name": "Sanitize Corp\x00",
+                "customer_id": "CUST-SAN-01",
+                "summary": "Clean\x00Summary",
+            },
+            format="json",
+        )
+        self.assertEqual(inv_res.status_code, 201)
+        inv_data = inv_res.json()
+        inv_pk = inv_data["id"]
+        inv_code = inv_data["investigation_id"]
+        # Embedded NUL bytes must be stripped cleanly
+        self.assertNotIn("\x00", inv_data["title"])
+        self.assertNotIn("\x00", inv_data["summary"])
+
+        # Add related incident and external research so we can test INV###### filtering on them
+        rel_res = self.client.post(
+            "/api/related-incidents/",
+            {"investigation": inv_code, "title": "Escalation Alpha", "link": "https://soc.example/inc/1"},
+            format="json",
+        )
+        self.assertEqual(rel_res.status_code, 201)
+        ext_res = self.client.post(
+            "/api/external-research/",
+            {"investigation": inv_code, "link": "https://attack.mitre.org/techniques/T1059/", "summary": "MITRE"},
+            format="json",
+        )
+        self.assertEqual(ext_res.status_code, 201)
+
+        # ?investigation=INV###### on related-incidents and external-research must return 200 (not ValueError 500!)
+        self.assertEqual(len(self.client.get(f"/api/related-incidents/?investigation={inv_code}").json()), 1)
+        self.assertEqual(len(self.client.get(f"/api/external-research/?investigation={inv_code}").json()), 1)
+
+        hostile_params = [
+            "' OR '1'='1",
+            "1; DROP TABLE investigations_investigation; --",
+            "9" * 40,       # Exceeds 64-bit BIGINT max PK
+            "²",            # Non-ASCII Unicode digit where str.isdigit() is True
+            "-42",
+            "INV999999",
+        ]
+        for payload in hostile_params:
+            for endpoint in (
+                "/api/investigations/",
+                "/api/customers/",
+                "/api/customer-contacts/",
+                "/api/evidence/",
+                "/api/related-incidents/",
+                "/api/external-research/",
+            ):
+                res = self.client.get(
+                    endpoint,
+                    {"investigation": payload, "customer": payload, "status": payload, "code": payload},
+                )
+                self.assertEqual(res.status_code, 200, f"Unexpected {res.status_code} on {endpoint} for {payload!r}")
+
+            detail_inv = self.client.get(f"/api/investigations/{payload}/")
+            self.assertEqual(detail_inv.status_code, 404)
+            detail_cust = self.client.get(f"/api/customers/{payload}/")
+            self.assertEqual(detail_cust.status_code, 404)
+
+            ingest_res = self.client.post(
+                "/api/soc/ingest/",
+                {"investigation": payload, "summary": "Probe"},
+                format="json",
+            )
+            self.assertEqual(ingest_res.status_code, 400)
+
+        # Confirm database integrity is completely untouched
+        self.assertTrue(Investigation.objects.filter(pk=inv_pk).exists())
+
+    def test_link_scheme_xss_and_path_traversal_sanitization(self):
+        self.client.force_authenticate(user=self.analyst_user)
+        inv_res = self.client.post(
+            "/api/investigations/",
+            {"title": "Security Validation Case", "customer_name": "SecCorp", "customer_id": "CUST-SEC-01"},
+            format="json",
+        )
+        self.assertEqual(inv_res.status_code, 201)
+        inv_id = inv_res.json()["id"]
+
+        unsafe_links = [
+            "javascript:alert(document.cookie)",
+            "JAVASCRIPT:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "//evil.attacker.example/phish",
+            "ftp://files.attacker.example/mal.exe",
+        ]
+        for bad_link in unsafe_links:
+            self.assertEqual(
+                self.client.patch(
+                    f"/api/investigations/{inv_id}/",
+                    {"ticket_link": bad_link},
+                    format="json",
+                ).status_code,
+                400,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/api/related-incidents/",
+                    {"investigation": inv_id, "title": "Bad Link", "link": bad_link},
+                    format="json",
+                ).status_code,
+                400,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/api/external-research/",
+                    {"investigation": inv_id, "link": bad_link},
+                    format="json",
+                ).status_code,
+                400,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/api/evidence/",
+                    {"investigation": inv_id, "summary": "Bad Log Link", "related_log_link": bad_link},
+                    format="json",
+                ).status_code,
+                400,
+            )
+
+        # Path traversal in investigation_id or customer_id must be rejected
+        self.assertEqual(
+            self.client.post(
+                "/api/investigations/",
+                {"investigation_id": "../../etc/passwd", "title": "Traversal"},
+                format="json",
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/customers/",
+                {"name": "Traversal Cust", "customer_id": "../../outside"},
+                format="json",
+            ).status_code,
+            400,
+        )
+
+        # Uploaded screenshot & PCAP filenames with traversal/quotes must stay confined to artifact folder
+        png_upload = SimpleUploadedFile(
+            '../../evil"quote.png',
+            self._make_png_bytes(),
+            content_type="image/png",
+        )
+        pcap_upload = SimpleUploadedFile(
+            '../../capture"quote.pcap',
+            b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00",
+            content_type="application/vnd.tcpdump.pcap",
+        )
+        ev_res = self.client.post(
+            "/api/evidence/",
+            {
+                "investigation": inv_id,
+                "summary": "Filename Sanitization Check",
+                "screenshots_upload": png_upload,
+                "pcaps_upload": pcap_upload,
+            },
+            format="multipart",
+        )
+        self.assertEqual(ev_res.status_code, 201)
+        ev_json = ev_res.json()
+        shot_filename = ev_json["screenshots"][0]["filename"]
+        pcap_id = ev_json["pcaps"][0]["id"]
+        self.assertNotIn("..", shot_filename)
+        self.assertNotIn('"', shot_filename)
+
+        dl_res = self.client.get(f"/api/pcaps/{pcap_id}/?download=1")
+        self.assertEqual(dl_res.status_code, 200)
+        self.assertNotIn("\r", dl_res["Content-Disposition"])
+        self.assertNotIn("\n", dl_res["Content-Disposition"])
+        self.assertEqual(b"".join(dl_res.streaming_content), b"\xd4\xc3\xb2\xa1\x02\x00\x04\x00")
+
+    def test_user_labels_and_django_admin_registered_actions(self):
+        # 1. User.__str__ displays "username (First Last)" or preferred_display_name fallback
+        self.assertEqual(str(self.analyst_user), "analyst1 (James Holden)")
+
+        nick_user = create_user_with_role("nickonly", "Str0ngNickPass!99", UserProfile.ROLE_ANALYST)
+        self.assertEqual(str(nick_user), "nickonly")
+        nick_user.profile.preferred_display_name = "Naomi Nagata"
+        nick_user.profile.save(update_fields=["preferred_display_name", "updated_at"])
+        nick_user.refresh_from_db()
+        self.assertEqual(str(nick_user), "nickonly (Naomi Nagata)")
+
+        # 2. Verify InvestigationAdmin and EvidenceItemAdmin expose registered bulk actions
+        inv_admin = admin.site._registry[Investigation]
+        ev_admin = admin.site._registry[EvidenceItem]
+
+        req = self.factory.get("/admin/investigations/investigation/")
+        req.user = self.super_admin
+
+        inv_actions = inv_admin.get_actions(req)
+        for expected_action in (
+            "action_status_triage",
+            "action_status_investigating",
+            "action_status_awaiting_customer",
+            "action_status_contained",
+            "action_status_closed",
+            "action_lock_investigations",
+            "action_unlock_investigations",
+            f"mass_assign_lead_to_{self.analyst_user.pk}",
+        ):
+            self.assertIn(expected_action, inv_actions)
+        # Dynamic lead analyst label includes username and full name
+        _, _, lead_desc = inv_actions[f"mass_assign_lead_to_{self.analyst_user.pk}"]
+        self.assertIn("analyst1 (James Holden)", lead_desc)
+
+        ev_actions = ev_admin.get_actions(req)
+        self.assertIn("action_set_atomic", ev_actions)
+        self.assertIn("action_set_search", ev_actions)
+        self.assertIn(f"mass_assign_evidence_to_user_{self.analyst_user.pk}", ev_actions)
+        _, _, ev_assign_desc = ev_actions[f"mass_assign_evidence_to_user_{self.analyst_user.pk}"]
+        self.assertIn("analyst1 (James Holden)", ev_assign_desc)
+
+        # Test admin lock/unlock actions set and clear locked_by / locked_at
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        setattr(req, "session", "session")
+        setattr(req, "_messages", FallbackStorage(req))
+        inv = Investigation.objects.create(title="Admin Lock Action Case")
+        inv_admin.action_lock_investigations(req, Investigation.objects.filter(pk=inv.pk))
+        inv.refresh_from_db()
+        self.assertTrue(inv.is_locked)
+        self.assertEqual(inv.locked_by, self.super_admin)
+        self.assertIsNotNone(inv.locked_at)
+
+        inv_admin.action_unlock_investigations(req, Investigation.objects.filter(pk=inv.pk))
+        inv.refresh_from_db()
+        self.assertFalse(inv.is_locked)
+        self.assertIsNone(inv.locked_by)
+        self.assertIsNone(inv.locked_at)
+
+    def test_markdown_report_pipe_escaping_and_all_five_demo_scenarios(self):
+        self.client.force_authenticate(user=self.super_admin)
+        inv = Investigation.objects.create(
+            title="Pipe Escape Report Case",
+            key_assets_affected="SRV-PIPE-01 | ZoneA",
+            key_malicious_indicators="evil.example | beacon",
+        )
+        ev = EvidenceItem.objects.create(
+            investigation=inv,
+            summary="Pipe | Summary",
+            affected_asset="WKSTN-01 | Corp",
+            mitre_tactic="Execution",
+            mitre_technique="T1059.001 - PowerShell",
+            is_key_evidence=True,
+        )
+        # Attach two screenshots with identical basenames to verify ZIP deduplication
+        for idx in range(2):
+            self.client.post(
+                "/api/screenshots/",
+                {
+                    "evidence": ev.id,
+                    "caption": f"Shot {idx}",
+                    "image": SimpleUploadedFile("duplicate.png", self._make_png_bytes(), content_type="image/png"),
+                },
+                format="multipart",
+            )
+
+        zip_res = self.client.get(f"/api/investigations/{inv.id}/report_md/?bundle=zip")
+        self.assertEqual(zip_res.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(zip_res.content), "r") as zf:
+            names = zf.namelist()
+            self.assertEqual(len(names), len(set(names)))
+            md_files = [n for n in names if n.endswith(".md")]
+            self.assertEqual(len(md_files), 1)
+            md_body = zf.read(md_files[0]).decode("utf-8")
+            self.assertIn("\\|", md_body)
+
+        # Verify all 5 demo scenarios (including 'god_of_war') seed cleanly even when INV000001 already exists
+        cat_res = self.client.get("/api/investigations/demo_scenarios/")
+        self.assertEqual(cat_res.status_code, 200)
+        self.assertEqual(len(cat_res.json()), 5)
+
+        seed_all = self.client.post("/api/investigations/seed_demo/", {"scenario": "all"}, format="json")
+        self.assertEqual(seed_all.status_code, 201)
+        self.assertEqual(seed_all.json()["count"], 5)
+
+        # Re-seeding a scenario a second time must also succeed without IntegrityError on investigation_id
+        seed_again = self.client.post("/api/investigations/seed_demo/", {"scenario": "god_of_war"}, format="json")
+        self.assertEqual(seed_again.status_code, 201)
+
+
 

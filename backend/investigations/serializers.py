@@ -1,5 +1,7 @@
 import os
+import re
 from pathlib import Path
+from urllib.parse import urlsplit
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -20,6 +22,7 @@ from .models import (
     get_or_create_user_profile,
     get_user_display_name,
     get_user_role,
+    is_valid_pk_int,
     sync_user_flags_for_role,
 )
 from .permissions import (
@@ -33,6 +36,76 @@ from .permissions import (
 from .reports import collect_mitre_summary
 
 User = get_user_model()
+
+ALLOWED_LINK_SCHEMES = {'http', 'https'}
+
+
+def _sanitize_payload_strings(mapping):
+    """Copies incoming serializer mapping while stripping NUL bytes from string fields."""
+    if not hasattr(mapping, 'copy'):
+        return mapping
+    copied = mapping.copy()
+    for key in list(copied.keys()):
+        val = copied.get(key)
+        if isinstance(val, str) and '\x00' in val:
+            copied[key] = val.replace('\x00', '')
+    return copied
+
+
+def validate_safe_link(value: str) -> str:
+    """
+    Validates analyst-supplied URLs/links to prevent stored XSS (`javascript:`, `data:`, `vbscript:`)
+    and header/control character injection while preserving standard `http(s)://` and relative links.
+    """
+    if value is None:
+        return ""
+    cleaned = str(value).replace('\x00', '').strip()
+    if not cleaned:
+        return ""
+    if any(ch in cleaned for ch in ('\r', '\n')):
+        raise serializers.ValidationError("Links cannot contain newline characters.")
+    if cleaned.startswith('/'):
+        if cleaned.startswith('//'):
+            raise serializers.ValidationError("Protocol-relative URLs are not permitted; use https:// or http://.")
+        return cleaned
+    # Detect explicit URI scheme before the first '/', '?', or '#'
+    scheme_match = re.match(r'^([A-Za-z][A-Za-z0-9+.-]*):', cleaned)
+    if scheme_match:
+        scheme = scheme_match.group(1).lower()
+        if scheme not in ALLOWED_LINK_SCHEMES:
+            raise serializers.ValidationError(
+                f"Unsupported or unsafe URL scheme '{scheme}:'. Only http:// and https:// links are allowed."
+            )
+        parsed = urlsplit(cleaned)
+        if not parsed.netloc:
+            raise serializers.ValidationError("Enter a valid http:// or https:// URL.")
+    elif ':' in cleaned.split('/')[0]:
+        raise serializers.ValidationError("Enter a valid http:// or https:// URL.")
+    return cleaned
+
+
+def _resolve_investigation_reference(data):
+    """
+    Normalizes legacy `project` alias and human-readable `INV######` codes into a valid
+    `Investigation` integer primary key on incoming serializer data.
+    """
+    data = _sanitize_payload_strings(data)
+    if 'project' in data and 'investigation' not in data:
+        data['investigation'] = data['project']
+    inv_val = data.get('investigation')
+    if inv_val is not None and inv_val != '':
+        inv_str = str(inv_val).strip()
+        if inv_str.upper().startswith('INV') or not is_valid_pk_int(inv_str):
+            inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
+            if inv_obj:
+                data['investigation'] = inv_obj.pk
+            else:
+                raise serializers.ValidationError({
+                    'investigation': f"Investigation with ID '{inv_str}' does not exist."
+                })
+        else:
+            data['investigation'] = int(inv_str)
+    return data
 
 
 class AuthUserSerializer(serializers.ModelSerializer):
@@ -338,13 +411,6 @@ class EvidenceScreenshotSerializer(serializers.ModelSerializer):
             return ""
         return os.path.basename(obj.image.name)
 
-    def create(self, validated_data):
-        if 'project' in validated_data and 'investigation' not in validated_data:
-            validated_data['investigation'] = validated_data.pop('project')
-        elif 'project' in validated_data:
-            validated_data.pop('project')
-        return super().create(validated_data)
-
     def get_created_by_username(self, obj) -> str:
         if obj.created_by_id and obj.created_by:
             return obj.created_by.username
@@ -416,13 +482,6 @@ class EvidencePcapSerializer(serializers.ModelSerializer):
         except Exception:
             pass
         return 0
-
-    def create(self, validated_data):
-        if 'project' in validated_data and 'investigation' not in validated_data:
-            validated_data['investigation'] = validated_data.pop('project')
-        elif 'project' in validated_data:
-            validated_data.pop('project')
-        return super().create(validated_data)
 
     def get_created_by_username(self, obj) -> str:
         if obj.created_by_id and obj.created_by:
@@ -500,21 +559,16 @@ class EvidenceItemSerializer(serializers.ModelSerializer):
         ]
 
     def to_internal_value(self, data):
-        data = data.copy()
-        if 'project' in data and 'investigation' not in data:
-            data['investigation'] = data['project']
-        inv_val = data.get('investigation')
-        if inv_val is not None:
-            inv_str = str(inv_val).strip()
-            if not inv_str.isdigit() or inv_str.upper().startswith('INV'):
-                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
-                if inv_obj:
-                    data['investigation'] = inv_obj.pk
-                else:
-                    raise serializers.ValidationError({
-                        'investigation': f"Investigation with ID '{inv_str}' does not exist."
-                    })
-        return super().to_internal_value(data)
+        return super().to_internal_value(_resolve_investigation_reference(data))
+
+    def validate_related_log_link(self, value):
+        return validate_safe_link(value)
+
+    def validate_search_result_link(self, value):
+        return validate_safe_link(value)
+
+    def validate_search_query_link(self, value):
+        return validate_safe_link(value)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -568,21 +622,17 @@ class RelatedIncidentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
     def to_internal_value(self, data):
-        data = data.copy()
-        if 'project' in data and 'investigation' not in data:
-            data['investigation'] = data['project']
-        inv_val = data.get('investigation')
-        if inv_val is not None:
-            inv_str = str(inv_val).strip()
-            if not inv_str.isdigit() or inv_str.upper().startswith('INV'):
-                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
-                if inv_obj:
-                    data['investigation'] = inv_obj.pk
-                else:
-                    raise serializers.ValidationError({
-                        'investigation': f"Investigation with ID '{inv_str}' does not exist."
-                    })
-        return super().to_internal_value(data)
+        return super().to_internal_value(_resolve_investigation_reference(data))
+
+    def validate_link(self, value):
+        return validate_safe_link(value)
+
+    def create(self, validated_data):
+        if 'project' in validated_data and 'investigation' not in validated_data:
+            validated_data['investigation'] = validated_data.pop('project')
+        elif 'project' in validated_data:
+            validated_data.pop('project')
+        return super().create(validated_data)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -632,31 +682,47 @@ class CustomerContactSerializer(serializers.ModelSerializer):
         ]
 
     def to_internal_value(self, data):
-        data = data.copy()
+        data = _sanitize_payload_strings(data)
         cust_val = data.get('customer')
-        if cust_val is not None and isinstance(cust_val, str) and not cust_val.isdigit():
-            cust_obj = Customer.objects.filter(customer_id__iexact=cust_val.strip()).first()
-            if cust_obj:
-                data['customer'] = cust_obj.pk
+        if cust_val is not None and cust_val != '':
+            cust_str = str(cust_val).strip()
+            if not is_valid_pk_int(cust_str):
+                cust_obj = Customer.objects.filter(customer_id__iexact=cust_str).first()
+                if cust_obj:
+                    data['customer'] = cust_obj.pk
+                else:
+                    raise serializers.ValidationError({
+                        'customer': f"Customer with code '{cust_str}' does not exist."
+                    })
             else:
-                raise serializers.ValidationError({
-                    'customer': f"Customer with code '{cust_val}' does not exist."
-                })
+                data['customer'] = int(cust_str)
         if 'project' in data and 'customer' not in data:
             proj_id = data.get('project')
             inv = None
-            if proj_id is not None:
+            if proj_id is not None and proj_id != '':
                 p_str = str(proj_id).strip()
                 inv = Investigation.objects.filter(investigation_id__iexact=p_str).first()
-                if not inv and p_str.isdigit():
+                if not inv and is_valid_pk_int(p_str):
                     inv = Investigation.objects.filter(pk=int(p_str)).first()
             if inv:
                 data['customer'] = inv.customer_id
+                if not is_valid_pk_int(p_str):
+                    data['project'] = inv.pk
+        elif 'project' in data and data.get('project') is not None and data.get('project') != '':
+            p_str = str(data.get('project')).strip()
+            if not is_valid_pk_int(p_str):
+                inv = Investigation.objects.filter(investigation_id__iexact=p_str).first()
+                if inv:
+                    data['project'] = inv.pk
         return super().to_internal_value(data)
 
     def create(self, validated_data):
         validated_data.pop('project', None)
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop('project', None)
+        return super().update(instance, validated_data)
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -677,7 +743,27 @@ class CustomerSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'contacts', 'investigations_count', 'created_at', 'updated_at']
 
+    def to_internal_value(self, data):
+        return super().to_internal_value(_sanitize_payload_strings(data))
+
+    def validate_name(self, value: str) -> str:
+        cleaned = re.sub(r'[\x00-\x1f\x7f]+', ' ', str(value or '')).strip()
+        if not cleaned:
+            raise serializers.ValidationError("Customer name cannot be blank.")
+        return cleaned
+
+    def validate_customer_id(self, value: str) -> str:
+        cleaned = re.sub(r'[\x00-\x1f\x7f]+', '', str(value or '')).strip()
+        if not cleaned:
+            raise serializers.ValidationError("Customer ID cannot be blank.")
+        if any(sep in cleaned for sep in ('/', '\\')) or '..' in cleaned:
+            raise serializers.ValidationError("Customer ID cannot contain path separators or '..'.")
+        return cleaned
+
     def get_investigations_count(self, obj) -> int:
+        annotated = getattr(obj, 'investigations_count_val', None)
+        if annotated is not None:
+            return int(annotated)
         return obj.investigations.count()
 
 
@@ -706,21 +792,17 @@ class ExternalResearchSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
     def to_internal_value(self, data):
-        data = data.copy()
-        if 'project' in data and 'investigation' not in data:
-            data['investigation'] = data['project']
-        inv_val = data.get('investigation')
-        if inv_val is not None:
-            inv_str = str(inv_val).strip()
-            if not inv_str.isdigit() or inv_str.upper().startswith('INV'):
-                inv_obj = Investigation.objects.filter(investigation_id__iexact=inv_str).first()
-                if inv_obj:
-                    data['investigation'] = inv_obj.pk
-                else:
-                    raise serializers.ValidationError({
-                        'investigation': f"Investigation with ID '{inv_str}' does not exist."
-                    })
-        return super().to_internal_value(data)
+        return super().to_internal_value(_resolve_investigation_reference(data))
+
+    def validate_link(self, value):
+        return validate_safe_link(value)
+
+    def create(self, validated_data):
+        if 'project' in validated_data and 'investigation' not in validated_data:
+            validated_data['investigation'] = validated_data.pop('project')
+        elif 'project' in validated_data:
+            validated_data.pop('project')
+        return super().create(validated_data)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -732,7 +814,7 @@ class ExternalResearchSerializer(serializers.ModelSerializer):
 
 
 class InvestigationSerializer(serializers.ModelSerializer):
-    investigation_id = serializers.CharField(required=False)
+    investigation_id = serializers.CharField(required=False, allow_blank=True)
     customer_detail = CustomerSerializer(source='customer', read_only=True)
     customer_contacts = CustomerContactSerializer(source='customer.contacts', many=True, read_only=True)
     customer_name = serializers.CharField(source='customer.name', read_only=True)
@@ -755,6 +837,7 @@ class InvestigationSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     archive_files = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     locked_by_username = serializers.SerializerMethodField()
     locked_by_display = serializers.SerializerMethodField()
 
@@ -783,6 +866,7 @@ class InvestigationSerializer(serializers.ModelSerializer):
             'external_research_summary',
             'external_research_items',
             'status',
+            'status_display',
             'is_locked',
             'locked_by',
             'locked_by_username',
@@ -822,38 +906,66 @@ class InvestigationSerializer(serializers.ModelSerializer):
         ]
 
     def to_internal_value(self, data):
-        data = data.copy()
+        data = _sanitize_payload_strings(data)
+        if data.get('customer') == '':
+            data['customer'] = None
+        if data.get('lead_analyst_user') == '':
+            data['lead_analyst_user'] = None
+
         cust_val = data.get('customer') or data.get('customer_id') or data.get('customer_code')
-        if cust_val is not None:
-            if isinstance(cust_val, str) and not cust_val.isdigit():
-                cust_obj = Customer.objects.filter(customer_id__iexact=cust_val.strip()).first()
+        if cust_val is not None and cust_val != '':
+            cust_str = str(cust_val).strip()
+            if isinstance(cust_val, str) and not is_valid_pk_int(cust_str):
+                if any(sep in cust_str for sep in ('/', '\\')) or '..' in cust_str:
+                    raise serializers.ValidationError({
+                        'customer': "Customer identifier cannot contain path separators or '..'."
+                    })
+                cust_obj = Customer.objects.filter(customer_id__iexact=cust_str).first()
                 if not cust_obj:
-                    cust_obj = Customer.objects.filter(name__iexact=cust_val.strip()).first()
+                    cust_obj = Customer.objects.filter(name__iexact=cust_str).first()
                 if cust_obj:
                     data['customer'] = cust_obj.pk
                 else:
-                    cust_name = (data.get('customer_name') or f"Customer {cust_val.strip()}").strip()
+                    cust_name = (data.get('customer_name') or f"Customer {cust_str}").strip()
                     cust_obj, _ = Customer.objects.get_or_create(
-                        customer_id=cust_val.strip(),
-                        defaults={'name': cust_name},
+                        customer_id=cust_str[:64],
+                        defaults={'name': cust_name[:255]},
                     )
                     data['customer'] = cust_obj.pk
-            elif isinstance(cust_val, (int, str)):
-                try:
-                    pk_val = int(cust_val)
-                    cust_obj = Customer.objects.filter(pk=pk_val).first()
-                    if not cust_obj:
-                        cust_obj = Customer.objects.filter(customer_id=str(cust_val)).first()
-                    if cust_obj:
-                        data['customer'] = cust_obj.pk
-                except ValueError:
-                    pass
+            elif is_valid_pk_int(cust_str):
+                pk_val = int(cust_str)
+                cust_obj = Customer.objects.filter(pk=pk_val).first()
+                if not cust_obj:
+                    cust_obj = Customer.objects.filter(customer_id=cust_str).first()
+                if cust_obj:
+                    data['customer'] = cust_obj.pk
 
         inv_code = data.get('investigation_id') or data.get('code')
-        if inv_code and isinstance(inv_code, str):
+        if inv_code is not None and isinstance(inv_code, str):
             data['investigation_id'] = inv_code.strip().upper()
 
         return super().to_internal_value(data)
+
+    def validate_investigation_id(self, value: str) -> str:
+        cleaned = str(value or '').strip().upper()
+        if not cleaned:
+            return ''
+        if not re.match(r'^[A-Z0-9][A-Z0-9_-]{0,31}$', cleaned):
+            raise serializers.ValidationError(
+                "Investigation ID must be 1-32 alphanumeric characters (hyphens and underscores allowed)."
+            )
+        qs = Investigation.objects.filter(investigation_id__iexact=cleaned)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(f"Investigation with ID '{cleaned}' already exists.")
+        return cleaned
+
+    def validate_ticket_link(self, value):
+        return validate_safe_link(value)
+
+    def validate_external_research_link(self, value):
+        return validate_safe_link(value)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -879,38 +991,51 @@ class InvestigationSerializer(serializers.ModelSerializer):
             return get_user_display_name(obj.locked_by)
         return ""
 
+    def _get_ordered_evidence_list(self, obj) -> list:
+        cached = getattr(obj, '_cached_timeline_evidence', None)
+        if cached is not None:
+            return cached
+        items = list(obj.get_timeline_evidence())
+        obj._cached_timeline_evidence = items
+        return items
+
     def get_timeline_evidence(self, obj):
-        items = obj.get_timeline_evidence()
+        items = self._get_ordered_evidence_list(obj)
         return EvidenceItemSerializer(items, many=True, context=self.context).data
 
     def get_evidence_count(self, obj):
-        return obj.evidence_items.count()
+        return len(self._get_ordered_evidence_list(obj))
 
     def get_key_evidence_count(self, obj):
-        return obj.evidence_items.filter(is_key_evidence=True).count()
+        return sum(1 for item in self._get_ordered_evidence_list(obj) if item.is_key_evidence)
 
     def get_analysts_contributing(self, obj):
         analysts = set()
         if obj.lead_analyst:
             analysts.add(obj.lead_analyst)
-        for name in obj.evidence_items.values_list('analyst_name', flat=True):
+        for item in self._get_ordered_evidence_list(obj):
+            name = item.analyst_name
             if name and name.strip():
                 analysts.add(name.strip())
         return sorted(analysts)
 
     def get_mitre_summary(self, obj):
-        return collect_mitre_summary(obj.get_timeline_evidence())
+        return collect_mitre_summary(self._get_ordered_evidence_list(obj))
 
     def get_archive_files(self, obj):
         if not obj.artifact_folder:
             return []
-        folder_path = Path(settings.ARTIFACTS_ROOT) / obj.artifact_folder
-        if not folder_path.exists():
+        artifacts_root = Path(settings.ARTIFACTS_ROOT).resolve()
+        safe_folder = os.path.basename(str(obj.artifact_folder).replace("\\", "/"))
+        if not safe_folder or safe_folder in {".", ".."}:
+            return []
+        folder_path = (artifacts_root / safe_folder).resolve()
+        if folder_path.parent != artifacts_root or not folder_path.exists():
             return []
         files = []
         for file_path in sorted(folder_path.rglob("*")):
             if file_path.is_file():
-                rel = file_path.relative_to(Path(settings.ARTIFACTS_ROOT))
+                rel = file_path.relative_to(artifacts_root)
                 files.append({
                     "relative_path": str(rel),
                     "subfolder": str(file_path.parent.relative_to(folder_path)),

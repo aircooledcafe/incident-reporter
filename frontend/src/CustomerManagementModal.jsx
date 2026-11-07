@@ -15,10 +15,7 @@ import {
   Plus,
   Trash2,
   Edit2,
-  ShieldAlert,
   Search,
-  CheckCircle,
-  X,
 } from 'lucide-react';
 import { api } from './api';
 

@@ -9,7 +9,7 @@ import {
   UserCheck,
   Save,
 } from 'lucide-react';
-import { api } from './api';
+import { api, safeHref } from './api';
 
 export default function ProjectOverviewExtras({
   activeProject,
@@ -195,14 +195,18 @@ export default function ProjectOverviewExtras({
                     <div>
                       <div className="fw-semibold text-white small">{rel.title}</div>
                       <div>
-                        <a
-                          href={rel.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-lb-cyan mono-text small text-decoration-none"
-                        >
-                          {rel.link} <ExternalLink size={12} />
-                        </a>
+                        {safeHref(rel.link) ? (
+                          <a
+                            href={safeHref(rel.link)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-lb-cyan mono-text small text-decoration-none"
+                          >
+                            {rel.link} <ExternalLink size={12} />
+                          </a>
+                        ) : (
+                          <span className="text-secondary mono-text small">{rel.link}</span>
+                        )}
                       </div>
                       {rel.analyst_name && (
                         <div className="text-secondary" style={{ fontSize: '0.72rem' }}>

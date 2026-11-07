@@ -27,9 +27,13 @@ def protected_artifact_serve(request, path):
     if not is_authed:
         return HttpResponse("Authentication required.", status=401)
 
+    if '\x00' in (path or ''):
+        raise Http404("Invalid artifact path.")
+
     response = serve(request, path, document_root=settings.MEDIA_ROOT)
     if request.GET.get('download') == '1':
-        safe_filename = Path(path).name.replace('"', '')
+        raw_name = Path(path).name
+        safe_filename = ''.join(ch for ch in raw_name if ch >= ' ' and ch not in ('"', '\\', '\x7f')) or 'artifact.bin'
         response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
     return response
 

@@ -10,6 +10,7 @@ import {
   Download,
 } from 'lucide-react';
 import { splitMitreValues } from './mitreData';
+import { safeHref } from './api';
 
 function formatUtcTimestamp(isoString) {
   if (!isoString) return 'N/A';
@@ -241,40 +242,52 @@ export default function EvidenceDetailModal({
               {item.related_log_link && (
                 <div>
                   <span className="text-secondary me-2">Related Log / IDS Link:</span>
-                  <a
-                    href={item.related_log_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-lb-cyan mono-text text-decoration-none text-break"
-                  >
-                    {item.related_log_link} <ExternalLink size={12} />
-                  </a>
+                  {safeHref(item.related_log_link) ? (
+                    <a
+                      href={safeHref(item.related_log_link)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-lb-cyan mono-text text-decoration-none text-break"
+                    >
+                      {item.related_log_link} <ExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span className="text-secondary mono-text text-break">{item.related_log_link}</span>
+                  )}
                 </div>
               )}
               {item.search_result_link && (
                 <div>
                   <span className="text-secondary me-2">Search Result Link:</span>
-                  <a
-                    href={item.search_result_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-lb-cyan mono-text text-decoration-none text-break"
-                  >
-                    {item.search_result_link} <ExternalLink size={12} />
-                  </a>
+                  {safeHref(item.search_result_link) ? (
+                    <a
+                      href={safeHref(item.search_result_link)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-lb-cyan mono-text text-decoration-none text-break"
+                    >
+                      {item.search_result_link} <ExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span className="text-secondary mono-text text-break">{item.search_result_link}</span>
+                  )}
                 </div>
               )}
               {item.search_query_link && (
                 <div>
                   <span className="text-secondary me-2">Search Query Link:</span>
-                  <a
-                    href={item.search_query_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-lb-cyan mono-text text-decoration-none text-break"
-                  >
-                    {item.search_query_link} <ExternalLink size={12} />
-                  </a>
+                  {safeHref(item.search_query_link) ? (
+                    <a
+                      href={safeHref(item.search_query_link)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-lb-cyan mono-text text-decoration-none text-break"
+                    >
+                      {item.search_query_link} <ExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span className="text-secondary mono-text text-break">{item.search_query_link}</span>
+                  )}
                 </div>
               )}
             </div>

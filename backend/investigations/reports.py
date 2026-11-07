@@ -559,7 +559,13 @@ def generate_key_evidence_odt(project) -> tuple[bytes, Path]:
     return odt_bytes, report_path
 
 
-def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
+def _escape_md_cell(value: str) -> str:
+    if not value:
+        return ""
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes, Path]:
     """
     Report Two (Markdown + dedicated screenshots folder):
     Follows the exact structure:
@@ -673,7 +679,7 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     assets_list = collect_project_assets(project, all_items)
     if assets_list:
         for a in assets_list:
-            lines.append(f"| {a} |")
+            lines.append(f"| {_escape_md_cell(a)} |")
     else:
         lines.append("| None recorded |")
 
@@ -687,7 +693,7 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     indicators_list = collect_project_indicators(project, all_items)
     if indicators_list:
         for ind in indicators_list:
-            lines.append(f"| {ind} |")
+            lines.append(f"| {_escape_md_cell(ind)} |")
     else:
         lines.append("| None recorded |")
 
@@ -702,7 +708,9 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     if mitre_rows:
         for row in mitre_rows:
             assets_str = ", ".join(row["assets"]) if row["assets"] else "—"
-            lines.append(f"| {row['tactic']} | {row['technique']} | {assets_str} |")
+            lines.append(
+                f"| {_escape_md_cell(row['tactic'])} | {_escape_md_cell(row['technique'])} | {_escape_md_cell(assets_str)} |"
+            )
     else:
         lines.append("| None recorded | — | — |")
     lines.append("")
@@ -713,12 +721,20 @@ def generate_key_evidence_markdown(project) -> tuple[str, Path, bytes]:
     report_path.write_text(md_content, encoding="utf-8")
 
     zip_buf = io.BytesIO()
+    seen_arcnames: set[str] = set()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(report_path.name, md_content)
+        seen_arcnames.add(report_path.name)
         for file_path in copied_files:
-            zf.write(file_path, arcname=f"{screenshots_subdir_name}/{file_path.name}")
+            arcname = f"{screenshots_subdir_name}/{file_path.name}"
+            if arcname not in seen_arcnames and file_path.exists():
+                zf.write(file_path, arcname=arcname)
+                seen_arcnames.add(arcname)
         for pcap_path in copied_pcap_files:
-            zf.write(pcap_path, arcname=f"{pcaps_subdir_name}/{pcap_path.name}")
+            arcname = f"{pcaps_subdir_name}/{pcap_path.name}"
+            if arcname not in seen_arcnames and pcap_path.exists():
+                zf.write(pcap_path, arcname=arcname)
+                seen_arcnames.add(arcname)
     zip_bytes = zip_buf.getvalue()
     zip_filename = build_investigation_report_filename(project, "zip")
     zip_path = reports_dir / zip_filename

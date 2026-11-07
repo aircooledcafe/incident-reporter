@@ -23,6 +23,7 @@ from .models import (
     Investigation,
     Project,
     RelatedIncident,
+    suppress_timeline_sync,
 )
 from .reports import (
     generate_key_evidence_markdown,
@@ -108,13 +109,20 @@ def _materialize_scenario(spec: dict) -> Investigation:
     cust_name = inv_data.pop("customer_name", "Acme Corporation")
     cust_id = inv_data.pop("customer_id", "CUST-DEFAULT")
 
-    customer, _ = Customer.objects.get_or_create(
-        name=cust_name,
-        defaults={
-            "customer_id": cust_id,
-            "notes": f"Enterprise client profile for {cust_name}.",
-        },
+    customer = (
+        Customer.objects.filter(name=cust_name).first()
+        or Customer.objects.filter(customer_id__iexact=cust_id).first()
     )
+    if not customer:
+        customer = Customer.objects.create(
+            name=cust_name,
+            customer_id=cust_id,
+            notes=f"Enterprise client profile for {cust_name}.",
+        )
+
+    preferred_inv_id = inv_data.get("investigation_id")
+    if preferred_inv_id and Investigation.objects.filter(investigation_id__iexact=preferred_inv_id).exists():
+        inv_data.pop("investigation_id", None)
 
     investigation = Investigation.objects.create(customer=customer, **inv_data)
 
@@ -137,42 +145,42 @@ def _materialize_scenario(spec: dict) -> Investigation:
     for research in spec.get("research", []):
         ExternalResearch.objects.create(investigation=investigation, **research)
 
-    for ev_spec in spec.get("events", []):
-        ev = EvidenceItem.objects.create(
-            investigation=investigation,
-            evidence_type=ev_spec["type"],
-            analyst_name=ev_spec["analyst"],
-            timestamp=ev_spec["ts"],
-            end_timestamp=ev_spec["end_ts"],
-            summary=ev_spec["summary"],
-            affected_asset=ev_spec["asset"],
-            affected_user=ev_spec["user"],
-            user_created_by_attacker=ev_spec["attacker_user"],
-            malicious_hosts_ips=ev_spec["indicators"],
-            commands_run=ev_spec["cmd"],
-            mitre_tactic=ev_spec["tactic"],
-            mitre_technique=ev_spec["technique"],
-            related_log_link=ev_spec["log_link"],
-            search_result_link=ev_spec["res_link"],
-            search_query_link=ev_spec["qry_link"],
-            notes=ev_spec["notes"],
-            is_key_evidence=ev_spec["key"],
-        )
-        if ev_spec.get("shot"):
-            filename, title, lines = ev_spec["shot"]
-            png_bytes = _create_sample_terminal_screenshot(title, lines)
-            shot = EvidenceScreenshot(
-                evidence=ev,
-                caption=title,
+    with suppress_timeline_sync():
+        for ev_spec in spec.get("events", []):
+            ev = EvidenceItem.objects.create(
+                investigation=investigation,
+                evidence_type=ev_spec["type"],
                 analyst_name=ev_spec["analyst"],
+                timestamp=ev_spec["ts"],
+                end_timestamp=ev_spec["end_ts"],
+                summary=ev_spec["summary"],
+                affected_asset=ev_spec["asset"],
+                affected_user=ev_spec["user"],
+                user_created_by_attacker=ev_spec["attacker_user"],
+                malicious_hosts_ips=ev_spec["indicators"],
+                commands_run=ev_spec["cmd"],
+                mitre_tactic=ev_spec["tactic"],
+                mitre_technique=ev_spec["technique"],
+                related_log_link=ev_spec["log_link"],
+                search_result_link=ev_spec["res_link"],
+                search_query_link=ev_spec["qry_link"],
+                notes=ev_spec["notes"],
+                is_key_evidence=ev_spec["key"],
             )
-            shot.image.save(filename, ContentFile(png_bytes), save=True)
+            if ev_spec.get("shot"):
+                filename, title, lines = ev_spec["shot"]
+                png_bytes = _create_sample_terminal_screenshot(title, lines)
+                shot = EvidenceScreenshot(
+                    evidence=ev,
+                    caption=title,
+                    analyst_name=ev_spec["analyst"],
+                )
+                shot.image.save(filename, ContentFile(png_bytes), save=True)
 
     generate_timeline_csv(investigation)
     generate_key_evidence_odt(investigation)
     generate_key_evidence_markdown(investigation)
     investigation.sync_timeline_events()
-    investigation.sync_archive_manifest()
     return investigation
 
 
@@ -228,16 +236,10 @@ def _get_expanse_spec() -> dict:
         "contacts": [
             {
                 "name": "Fred Johnson",
-                "role_title": "VP of Operations & Station Security",
-                "email": "f.johnson@tycho-manufacturing.example",
-                "phone": "+1-555-0142",
                 "notes": "Primary executive escalation point; approves Tier-0 AD remediation windows.",
             },
             {
                 "name": "Camina Drummer",
-                "role_title": "Director of Infrastructure & SOC Liaison",
-                "email": "c.drummer@tycho-manufacturing.example",
-                "phone": "+1-555-0188",
                 "notes": "Hands-on technical lead coordinating firewall blocks and EDR isolation.",
             },
         ],
@@ -766,16 +768,10 @@ def _get_star_trek_spec() -> dict:
         "contacts": [
             {
                 "name": "Geordi La Forge",
-                "role_title": "Chief Infrastructure Engineer, Utopia Planitia",
-                "email": "g.laforge@utopia-planitia.example",
-                "phone": "+1-555-1701",
                 "notes": "Owns WEB-LCARS-01 reverse proxy and IIS-UTOPIA-02 application servers.",
             },
             {
                 "name": "Bruce Maddox",
-                "role_title": "Associate Chair, Daystrom Research Portal",
-                "email": "b.maddox@daystrom-institute.example",
-                "phone": "+1-555-4747",
                 "notes": "Application owner reviewing uploaded research attachments and database schema sensitivity.",
             },
         ],
@@ -1022,16 +1018,10 @@ def _get_matrix_spec() -> dict:
         "contacts": [
             {
                 "name": "Thomas Anderson",
-                "role_title": "Senior Systems Programmer (Initial Patient Zero)",
-                "email": "t.anderson@metacortex.example",
-                "phone": "+1-555-0101",
                 "notes": "Confirmed encountering fake Cloudflare verification prompt while researching API docs.",
             },
             {
                 "name": "Jason Rhineheart",
-                "role_title": "VP of Enterprise Engineering, MetaCortex",
-                "email": "j.rhineheart@metacortex.example",
-                "phone": "+1-555-0190",
                 "notes": "Executive sponsor approving emergency forest-wide password & KRBTGT rotation.",
             },
         ],
@@ -1261,16 +1251,10 @@ def _get_star_wars_spec() -> dict:
         "contacts": [
             {
                 "name": "Mon Mothma",
-                "role_title": "Chief Financial Officer, Corellian Engineering",
-                "email": "m.mothma@corellia-eng.example",
-                "phone": "+1-555-3271",
                 "notes": "Executive stakeholder & impacted mailbox owner; coordinating partner BEC notifications.",
             },
             {
                 "name": "Wedge Antilles",
-                "role_title": "Lead Cloud Identity Architect",
-                "email": "w.antilles@corellia-eng.example",
-                "phone": "+1-555-3279",
                 "notes": "Restored after MFA reset; assisting with Conditional Access token-protection rollout.",
             },
         ],
@@ -1492,23 +1476,14 @@ def _get_god_of_war_spec() -> dict:
         "contacts": [
             {
                 "name": "Atreus (Loki)",
-                "role_title": "Principal Systems Architect",
-                "email": "atreus@midgard-realmworks.example",
-                "phone": "+1-555-0720",
                 "notes": "Primary technical contact who first reported .RAGNAROK encrypted files across network shares.",
             },
             {
                 "name": "Brok & Sindri (Huldra Brothers)",
-                "role_title": "Senior Infrastructure & Storage Engineers",
-                "email": "huldra.forge@midgard-realmworks.example",
-                "phone": "+1-555-0733",
                 "notes": "Supervising SAN storage isolation and verifying air-gapped tape backup sets.",
             },
             {
                 "name": "Freya",
-                "role_title": "Chief Information Security Officer",
-                "email": "freya.ciso@midgard-realmworks.example",
-                "phone": "+1-555-0799",
                 "notes": "Executive incident commander managing Board briefings and legal disclosures.",
             },
         ],

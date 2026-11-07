@@ -45,7 +45,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
-import { api } from './api';
+import { api, safeHref } from './api';
 import HomeDashboard from './HomeDashboard';
 import AccountProfileModal from './AccountProfileModal';
 import CustomerManagementModal from './CustomerManagementModal';
@@ -95,6 +95,11 @@ const DEFAULT_DEMO_SCENARIOS = [
     id: 'star_wars',
     theme: 'Star Wars',
     label: 'Star Wars — MitM Phishing, Spam Wave & Multi-Account Takeover',
+  },
+  {
+    id: 'god_of_war',
+    theme: 'God of War',
+    label: 'God of War — Fimbulwinter Ransomware Deployment & Domain Takeover',
   },
 ];
 
@@ -298,6 +303,7 @@ export default function App() {
   const [showDemoDropdown, setShowDemoDropdown] = useState(false);
   const userDropdownRef = useRef(null);
   const demoDropdownRef = useRef(null);
+  const headerStatusPickerRef = useRef(null);
 
   // Header status picker, Archive warning, & Project delete confirmation modal state
   const [showHeaderStatusPicker, setShowHeaderStatusPicker] = useState(false);
@@ -378,6 +384,9 @@ export default function App() {
       if (demoDropdownRef.current && !demoDropdownRef.current.contains(e.target)) {
         setShowDemoDropdown(false);
       }
+      if (headerStatusPickerRef.current && !headerStatusPickerRef.current.contains(e.target)) {
+        setShowHeaderStatusPicker(false);
+      }
     };
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
@@ -394,7 +403,12 @@ export default function App() {
       setAuthError('Your session has expired. Please sign in again.');
       return;
     }
-    setErrorMsg(`${prefix}: ${err.message}`);
+    const detail = err && typeof err === 'object' ? err.message : err;
+    if (prefix && detail) {
+      setErrorMsg(`${prefix}: ${detail}`);
+    } else {
+      setErrorMsg(String(prefix || detail || 'An unexpected error occurred.'));
+    }
   });
 
   const loadAnalystDirectory = useEventCallback(async () => {
@@ -497,7 +511,6 @@ export default function App() {
   useEffect(() => {
     if (authUserId) {
       loadProjects(null, true);
-      loadCustomers();
       loadAnalystDirectory();
       loadDemoScenarios();
     } else {
@@ -716,7 +729,7 @@ export default function App() {
       const primaryId = result?.primary?.id || result?.id;
       await loadProjects(primaryId);
       if (scenarioKey === 'all') {
-        notifySuccess(`Loaded all ${result?.count || 4} themed sample investigations.`);
+        notifySuccess(`Loaded all ${result?.count || demoScenarios?.length || 5} themed sample investigations.`);
       } else {
         notifySuccess(`Sample investigation loaded: "${result?.title || scenarioKey}".`);
         setMainView('investigations');
@@ -738,7 +751,7 @@ export default function App() {
       await loadProjects(updated.id);
       notifySuccess(
         updated.is_locked
-          ? 'Investigation locked (read-only). Toggle "Show Locked" in the sidebar to list locked items.'
+          ? 'Investigation locked (read-only). Select "Locked" or "All" in the filter menu to list locked items.'
           : 'Investigation unlocked (editing restored).',
       );
     } catch (err) {
@@ -871,7 +884,11 @@ export default function App() {
 
   const executeSaveProject = async () => {
     try {
-      const payload = { ...projectForm };
+      const payload = {
+        ...projectForm,
+        customer: projectForm.customer || null,
+        lead_analyst_user: projectForm.lead_analyst_user || null,
+      };
       if (!payload.customer && customers.length > 0) {
         payload.customer = customers[0].id;
       }
@@ -1530,7 +1547,7 @@ export default function App() {
           </div>
 
           <div className="d-flex align-items-center flex-wrap gap-2 ms-auto mt-2 mt-lg-0">
-            {/* Super Admin Only: Load Sample Investigation Dropdown (4 Themed Scenarios) */}
+            {/* Super Admin Only: Load Sample Investigation Dropdown (5 Themed Scenarios) */}
             {canSeedDemo && (
               <div className="position-relative" ref={demoDropdownRef}>
                 <Button
@@ -2095,7 +2112,7 @@ export default function App() {
                       {/* Status Selection Dropdown (Right-Justified on the same line as Title) */}
                       <div>
                         {canModifyActiveProject ? (
-                          <div className="position-relative d-inline-block">
+                          <div className="position-relative d-inline-block" ref={headerStatusPickerRef}>
                             <button
                               type="button"
                               onClick={() => setShowHeaderStatusPicker((prev) => !prev)}
@@ -2168,18 +2185,18 @@ export default function App() {
                         <span>Customer ID: <strong className="text-white mono-text">{activeProject.customer_id || 'N/A'}</strong></span>
                         <span>
                           Ticket:{' '}
-                          {activeProject.ticket_link ? (
+                          {safeHref(activeProject.ticket_link) ? (
                             <a
-                              href={activeProject.ticket_link}
+                              href={safeHref(activeProject.ticket_link)}
                               target="_blank"
-                              rel="noreferrer"
+                              rel="noopener noreferrer"
                               className="text-lb-cyan text-decoration-none"
                             >
                               {activeProject.ticket_id || activeProject.ticket_link}{' '}
                               <ExternalLink size={12} />
                             </a>
                           ) : (
-                            activeProject.ticket_id || 'N/A'
+                            activeProject.ticket_id || activeProject.ticket_link || 'N/A'
                           )}
                         </span>
                       </div>
@@ -2438,15 +2455,21 @@ export default function App() {
                                   <div>
                                     {activeProject.external_research_link && (
                                       <div>
-                                        <a
-                                          href={activeProject.external_research_link}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="text-lb-cyan mono-text text-decoration-none"
-                                        >
-                                          {activeProject.external_research_link}{' '}
-                                          <ExternalLink size={12} />
-                                        </a>
+                                        {safeHref(activeProject.external_research_link) ? (
+                                          <a
+                                            href={safeHref(activeProject.external_research_link)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-lb-cyan mono-text text-decoration-none"
+                                          >
+                                            {activeProject.external_research_link}{' '}
+                                            <ExternalLink size={12} />
+                                          </a>
+                                        ) : (
+                                          <span className="text-secondary mono-text small">
+                                            {activeProject.external_research_link}
+                                          </span>
+                                        )}
                                       </div>
                                     )}
                                     <div className="text-secondary small">
@@ -2473,14 +2496,18 @@ export default function App() {
                                   <div>
                                     {r.link && (
                                       <div>
-                                        <a
-                                          href={r.link}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="text-lb-cyan mono-text text-decoration-none"
-                                        >
-                                          {r.link} <ExternalLink size={12} />
-                                        </a>
+                                        {safeHref(r.link) ? (
+                                          <a
+                                            href={safeHref(r.link)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-lb-cyan mono-text text-decoration-none"
+                                          >
+                                            {r.link} <ExternalLink size={12} />
+                                          </a>
+                                        ) : (
+                                          <span className="text-secondary mono-text small">{r.link}</span>
+                                        )}
                                       </div>
                                     )}
                                     <div className="text-secondary small">{r.summary}</div>
@@ -2702,39 +2729,39 @@ export default function App() {
                                   {/* Analyst links to logs & searches are NOT defanged */}
                                   <td className="small" onClick={(e) => e.stopPropagation()}>
                                     <div className="d-flex flex-column gap-1">
-                                      {item.related_log_link && (
+                                      {safeHref(item.related_log_link) && (
                                         <a
-                                          href={item.related_log_link}
+                                          href={safeHref(item.related_log_link)}
                                           target="_blank"
-                                          rel="noreferrer"
+                                          rel="noopener noreferrer"
                                           className="text-lb-cyan text-decoration-none"
                                         >
                                           Log/IDS Link <ExternalLink size={11} />
                                         </a>
                                       )}
-                                      {item.search_result_link && (
+                                      {safeHref(item.search_result_link) && (
                                         <a
-                                          href={item.search_result_link}
+                                          href={safeHref(item.search_result_link)}
                                           target="_blank"
-                                          rel="noreferrer"
+                                          rel="noopener noreferrer"
                                           className="text-lb-cyan text-decoration-none"
                                         >
                                           Search Result <ExternalLink size={11} />
                                         </a>
                                       )}
-                                      {item.search_query_link && (
+                                      {safeHref(item.search_query_link) && (
                                         <a
-                                          href={item.search_query_link}
+                                          href={safeHref(item.search_query_link)}
                                           target="_blank"
-                                          rel="noreferrer"
+                                          rel="noopener noreferrer"
                                           className="text-lb-cyan text-decoration-none"
                                         >
                                           Search Query <ExternalLink size={11} />
                                         </a>
                                       )}
-                                      {!item.related_log_link &&
-                                        !item.search_result_link &&
-                                        !item.search_query_link && (
+                                      {!safeHref(item.related_log_link) &&
+                                        !safeHref(item.search_result_link) &&
+                                        !safeHref(item.search_query_link) && (
                                           <span className="text-secondary">—</span>
                                         )}
                                     </div>
@@ -2968,19 +2995,26 @@ export default function App() {
                                       <div className="small">
                                         <strong>Links:</strong>{' '}
                                         {links.length > 0 ? (
-                                          links.map((l, idx) => (
-                                            <React.Fragment key={idx}>
-                                              {idx > 0 && ' , '}
-                                              <a
-                                                href={l}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="text-lb-cyan mono-text text-decoration-none"
-                                              >
-                                                {l} <ExternalLink size={11} />
-                                              </a>
-                                            </React.Fragment>
-                                          ))
+                                          links.map((l, idx) => {
+                                            const safeLink = safeHref(l);
+                                            return (
+                                              <React.Fragment key={idx}>
+                                                {idx > 0 && ' , '}
+                                                {safeLink ? (
+                                                  <a
+                                                    href={safeLink}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-lb-cyan mono-text text-decoration-none"
+                                                  >
+                                                    {l} <ExternalLink size={11} />
+                                                  </a>
+                                                ) : (
+                                                  <span className="text-secondary mono-text">{l}</span>
+                                                )}
+                                              </React.Fragment>
+                                            );
+                                          })
                                         ) : (
                                           <span className="text-secondary">None</span>
                                         )}
@@ -4535,7 +4569,7 @@ export default function App() {
         onHide={() => setShowCustomerModal(false)}
         canManage={canEditRole}
         onNotifySuccess={notifySuccess}
-        onNotifyError={(msg) => handleApiError(null, msg)}
+        onNotifyError={(msg) => setErrorMsg(msg)}
         onCustomerCreated={(newCust) => {
           setProjectForm((prev) => ({
             ...prev,

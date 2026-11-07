@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import reverse
 
@@ -14,23 +15,12 @@ from .models import (
     EvidenceItem,
     EvidenceScreenshot,
     EvidencePcap,
+    format_user_label,
+    get_user_display_name,
 )
 from .permissions import is_super_admin
 
 User = get_user_model()
-
-
-def format_user_label(user) -> str:
-    full_name = f"{user.first_name} {user.last_name}".strip()
-    if not full_name and hasattr(user, 'profile') and getattr(user.profile, 'preferred_display_name', None):
-        full_name = user.profile.preferred_display_name.strip()
-    if full_name:
-        return f"{user.username} ({full_name})"
-    return user.username
-
-
-# Make user representations throughout admin selection boxes display username as well as first name and last name
-User.__str__ = format_user_label
 
 
 class UserLabelForeignKeyMixin:
@@ -206,6 +196,22 @@ class ExternalResearchInline(admin.TabularInline):
     show_change_link = True
 
 
+@admin.register(EvidenceScreenshot)
+class EvidenceScreenshotAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
+    list_display = ('id', 'evidence', 'caption', 'created_by', 'uploaded_at')
+    list_filter = ('created_by',)
+    search_fields = ('caption', 'analyst_name', 'evidence__summary')
+    readonly_fields = ('uploaded_at',)
+
+
+@admin.register(EvidencePcap)
+class EvidencePcapAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
+    list_display = ('id', 'evidence', 'description', 'created_by', 'uploaded_at')
+    list_filter = ('created_by',)
+    search_fields = ('description', 'analyst_name', 'evidence__summary')
+    readonly_fields = ('uploaded_at',)
+
+
 @admin.register(EvidenceItem)
 class EvidenceItemAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     list_display = (
@@ -229,11 +235,13 @@ class EvidenceItemAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
         'affected_asset',
         'affected_user',
         'investigation__title',
+        'investigation__investigation_id',
         'investigation__customer__name',
         'commands_run',
         'malicious_hosts_ips',
     )
     inlines = [EvidenceScreenshotInline, EvidencePcapInline]
+    actions = ('action_set_atomic', 'action_set_search')
 
     @admin.display(description='Investigation')
     def investigation_link(self, obj):
@@ -256,8 +264,7 @@ class EvidenceItemAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     @admin.display(description='Added / Created By')
     def created_by_display(self, obj):
         if obj.created_by:
-            full_name = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
-            return f"{obj.created_by.username} ({full_name})" if full_name else obj.created_by.username
+            return format_user_label(obj.created_by)
         return obj.analyst_name or "-"
 
     @admin.display(description='Attachments')
@@ -287,15 +294,14 @@ class EvidenceItemAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
         # Dynamically inject mass assignment actions for active users
         active_users = User.objects.filter(is_active=True).order_by('username')[:20]
         for user in active_users:
-            full_name = f"{user.first_name} {user.last_name}".strip()
-            display_name = f"{user.username} ({full_name})" if full_name else user.username
+            display_name = format_user_label(user)
             action_name = f'mass_assign_evidence_to_user_{user.id}'
 
             def make_assign_action(target_user, label):
                 def assign_action(modeladmin, req, queryset):
                     count = queryset.update(
                         created_by=target_user,
-                        analyst_name=target_user.get_full_name() or target_user.username
+                        analyst_name=get_user_display_name(target_user),
                     )
                     modeladmin.message_user(req, f"Mass-assigned {count} evidence item(s) to {label}.")
                 assign_action.__name__ = f'assign_{target_user.id}'
@@ -317,6 +323,7 @@ class EvidenceItemAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
 class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     list_display = (
         'id',
+        'investigation_id',
         'title',
         'customer_link',
         'ticket_id',
@@ -333,6 +340,7 @@ class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
         'lead_analyst_user',
     )
     search_fields = (
+        'investigation_id',
         'title',
         'ticket_id',
         'customer__name',
@@ -343,10 +351,11 @@ class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     fieldsets = (
         ('Investigation Overview', {
             'fields': (
-                'title',
+                ('investigation_id', 'title'),
                 'customer',
                 ('ticket_id', 'ticket_link'),
                 ('status', 'is_locked'),
+                ('locked_by', 'locked_at'),
                 ('lead_analyst_user', 'lead_analyst'),
             )
         }),
@@ -375,6 +384,15 @@ class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
         RelatedIncidentInline,
         ExternalResearchInline,
     ]
+    actions = (
+        'action_lock_investigations',
+        'action_unlock_investigations',
+        'action_status_triage',
+        'action_status_investigating',
+        'action_status_awaiting_customer',
+        'action_status_contained',
+        'action_status_closed',
+    )
 
     @admin.display(description='Customer')
     def customer_link(self, obj):
@@ -391,7 +409,6 @@ class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
             'AWAITING_CUSTOMER': '#0096b3',
             'CONTAINED': '#ffc107',
             'ARCHIVED': '#6c757d',
-            'DRAFT': '#6c757d',
         }.get(obj.status, '#495057')
         return format_html(
             '<span style="background-color: {}; color: white; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">{}</span>',
@@ -402,8 +419,7 @@ class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     @admin.display(description='Lead Analyst')
     def lead_analyst_display(self, obj):
         if obj.lead_analyst_user:
-            full_name = f"{obj.lead_analyst_user.first_name} {obj.lead_analyst_user.last_name}".strip()
-            return f"{obj.lead_analyst_user.username} ({full_name})" if full_name else obj.lead_analyst_user.username
+            return format_user_label(obj.lead_analyst_user)
         return obj.lead_analyst or "-"
 
     @admin.display(description='Evidence Items')
@@ -417,18 +433,36 @@ class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
     # Bulk Mass Actions for Investigations
     @admin.action(description="Lock selected investigations (Audit Protection)")
     def action_lock_investigations(self, request, queryset):
-        count = queryset.update(is_locked=True)
+        count = queryset.update(
+            is_locked=True,
+            locked_by=request.user,
+            locked_at=timezone.now(),
+        )
         self.message_user(request, f"Locked {count} investigation(s) for audit protection.")
 
     @admin.action(description="Unlock selected investigations")
     def action_unlock_investigations(self, request, queryset):
-        count = queryset.update(is_locked=False)
+        count = queryset.update(
+            is_locked=False,
+            locked_by=None,
+            locked_at=None,
+        )
         self.message_user(request, f"Unlocked {count} investigation(s).")
+
+    @admin.action(description="Set Status: Triage")
+    def action_status_triage(self, request, queryset):
+        count = queryset.update(status='OPEN')
+        self.message_user(request, f"Updated {count} investigation(s) to 'Triage'.")
 
     @admin.action(description="Set Status: Investigating")
     def action_status_investigating(self, request, queryset):
         count = queryset.update(status='INVESTIGATING')
         self.message_user(request, f"Updated {count} investigation(s) to 'Investigating'.")
+
+    @admin.action(description="Set Status: Awaiting Customer")
+    def action_status_awaiting_customer(self, request, queryset):
+        count = queryset.update(status='AWAITING_CUSTOMER')
+        self.message_user(request, f"Updated {count} investigation(s) to 'Awaiting Customer'.")
 
     @admin.action(description="Set Status: Contained")
     def action_status_contained(self, request, queryset):
@@ -445,14 +479,14 @@ class InvestigationAdmin(UserLabelForeignKeyMixin, admin.ModelAdmin):
         # Dynamically inject mass assignment actions for active users
         active_users = User.objects.filter(is_active=True).order_by('username')[:20]
         for user in active_users:
-            display_name = user.get_full_name() or user.username
+            display_name = format_user_label(user)
             action_name = f'mass_assign_lead_to_{user.id}'
 
             def make_assign_lead_action(target_user, label):
                 def assign_lead(modeladmin, req, queryset):
                     count = queryset.update(
                         lead_analyst_user=target_user,
-                        lead_analyst=target_user.get_full_name() or target_user.username
+                        lead_analyst=get_user_display_name(target_user),
                     )
                     modeladmin.message_user(req, f"Mass-assigned {count} investigation(s) to Lead Analyst: {label}.")
                 assign_lead.__name__ = f'assign_lead_{target_user.id}'
