@@ -376,7 +376,7 @@ class Investigation(models.Model):
 
     artifact_folder = models.CharField(max_length=255, blank=True, default="")
 
-    # Document-style embedded timeline (JSONB in PostgreSQL)
+    # Document-style embedded timeline (stored as JSON text via SQLite's JSON1 support)
     # Stored as an array of event objects: [{ id, timestamp, summary, mitre: [...], pcaps: [...], screenshots: [...] }]
     timeline_events = models.JSONField(default=list, blank=True)
 

@@ -135,24 +135,31 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Database (PostgreSQL)
-# https://docs.djangoproject.com/en/5.1/ref/settings/#databases
-POSTGRES_DB = os.environ.get('POSTGRES_DB', 'incident_reporter')
-POSTGRES_USER = os.environ.get('POSTGRES_USER', 'postgres')
-POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', '')
-POSTGRES_HOST = os.environ.get('POSTGRES_HOST', 'localhost')
-POSTGRES_PORT = os.environ.get('POSTGRES_PORT', '5432')
+# Database (SQLite3)
+# https://docs.djangoproject.com/en/5.1/ref/databases/#sqlite-notes
+# Single-file database sized for a small analyst team (~5-10 concurrent users).
+# DJANGO_DB_PATH lets Docker place the file on a mapped/persistent volume.
+DB_PATH = Path(os.environ.get('DJANGO_DB_PATH', str(BASE_DIR.parent / 'data' / 'db.sqlite3')))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': POSTGRES_DB,
-        'USER': POSTGRES_USER,
-        'PASSWORD': POSTGRES_PASSWORD,
-        'HOST': POSTGRES_HOST,
-        'PORT': POSTGRES_PORT,
-        'CONN_MAX_AGE': int(os.environ.get('POSTGRES_CONN_MAX_AGE', '60')),
-        'CONN_HEALTH_CHECKS': True,
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': DB_PATH,
+        'OPTIONS': {
+            # Wait up to 20s for a competing writer instead of failing with "database is locked".
+            'timeout': 20,
+            # Take the write lock at BEGIN so concurrent Gunicorn workers queue cleanly
+            # rather than deadlocking when a read transaction upgrades to a write.
+            'transaction_mode': 'IMMEDIATE',
+            # WAL lets readers proceed while a write is in progress; NORMAL sync is safe under WAL.
+            'init_command': (
+                'PRAGMA journal_mode=WAL;'
+                'PRAGMA synchronous=NORMAL;'
+                'PRAGMA busy_timeout=20000;'
+                'PRAGMA foreign_keys=ON;'
+            ),
+        },
     }
 }
 

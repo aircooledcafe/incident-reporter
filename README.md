@@ -142,7 +142,7 @@ No credentials or secrets are hardcoded in the codebase. You can create the firs
 
 ## Database Structure Overview
 
-All relational data—including Django's built-in user accounts, role profiles, active sessions, API tokens, customers, investigations, lock metadata, research links, timeline evidence, and attachment references—is stored in PostgreSQL (`POSTGRES_DB`), while binary screenshots, PCAPs, exported reports, and JSON archive manifests are persisted in `DJANGO_ARTIFACTS_ROOT`.
+All relational data—including Django's built-in user accounts, role profiles, active sessions, API tokens, customers, investigations, lock metadata, research links, timeline evidence, and attachment references—is stored in a single SQLite3 database file (`DJANGO_DB_PATH`), while binary screenshots, PCAPs, exported reports, and JSON archive manifests are persisted in `DJANGO_ARTIFACTS_ROOT`.
 
 ```mermaid
 erDiagram
@@ -297,7 +297,7 @@ erDiagram
 
 ### Storage & Relational Behavior
 - **Built-In Auth + `UserProfile`**: Uses Django's native `auth_user` table with a `1:1` `UserProfile` table storing the application role (`SUPER_ADMIN`, `ADMIN`, `ANALYST`, `EXECUTIVE`). `is_staff` and `is_superuser` are automatically synchronized so **only** `SUPER_ADMIN` can access `/admin/` to make direct database changes.
-- **Database-Backed Sessions & Tokens**: User login sessions (`django_session` via `SESSION_ENGINE = 'django.contrib.sessions.backends.db'`) and SOC ingestion API tokens (`authtoken_token`) live inside PostgreSQL rather than container memory.
+- **Database-Backed Sessions & Tokens**: User login sessions (`django_session` via `SESSION_ENGINE = 'django.contrib.sessions.backends.db'`) and SOC ingestion API tokens (`authtoken_token`) live inside the persistent SQLite database rather than container memory.
 - **Cascading Cleanup & Disk Synchronization**:
   - `ExternalResearch` and `EvidenceItem` cascade on `Investigation` deletion; `EvidenceScreenshot` cascades on `EvidenceItem` deletion and removes its image file from disk.
   - Deleting an unlocked `Investigation` (Admin / Super Admin only) also cleans up its `artifacts/<investigation_folder>/` directory.
@@ -315,11 +315,8 @@ Before starting the application (with Docker Compose or locally), copy `.env.exa
 | `DJANGO_DEBUG` | No | `False` | Enables Django debug mode (`True` or `False`). Keep `False` in production/Docker. |
 | `DJANGO_ALLOWED_HOSTS` | No | `*` | Comma-separated list of allowed hostnames/IPs (e.g., `localhost,127.0.0.1,192.168.1.50`). |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | No | *(Empty)* | Comma-separated trusted origins when accessed via reverse proxy / HTTPS (e.g., `https://ir.corp.example`). |
-| `POSTGRES_DB` | No | `incident_reporter` | PostgreSQL database name. |
-| `POSTGRES_USER` | No | `soc_admin` | PostgreSQL database username. |
-| `POSTGRES_PASSWORD` | No | `soc_secure_pass` | PostgreSQL database password. |
-| `POSTGRES_PORT` | No | `5432` | PostgreSQL port. |
-| `HOST_PG_DIR` | No | `./data/postgres` | Host or attached EBS volume storage path for PostgreSQL database files (`/var/lib/postgresql/data`). |
+| `DJANGO_DB_PATH` | No | `./data/db.sqlite3` (local) / `/data/db/db.sqlite3` (Docker) | Path to the SQLite3 database file. Set automatically by Docker Compose. |
+| `HOST_DB_DIR` | No | `./data` | Host or attached EBS volume directory mounted to `/data/db` in Docker (holds `db.sqlite3` and its `-wal`/`-shm` files). |
 | `HOST_ARTIFACTS_DIR` | No | `./artifacts` | External/host directory mounted to `/data/artifacts` in Docker (stores all investigation folders, uploaded screenshots, manifests, and generated `.csv`/`.odt`/`.md`/`.zip` reports). |
 | `DJANGO_SUPERUSER_USERNAME` | No | *(Empty)* | Optional initial Super Admin username created on startup by `ensure_superuser`. |
 | `DJANGO_SUPERUSER_PASSWORD` | No | *(Empty)* | Optional initial Super Admin password created on startup by `ensure_superuser`. |
@@ -343,9 +340,8 @@ p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={se
 
 ## Docker Deployment & Non-Ephemeral External Storage
 
-The Docker Compose stack runs three services:
-- **`postgres`**: PostgreSQL `16-alpine` database service with automated healthchecks and managed persistence (`postgres_data` Docker volume).
-- **`backend`**: Python `3.12-slim` + Django `5.1.14` + Gunicorn (`backend/Dockerfile`), automatically running migrations and `ensure_superuser` via `backend/entrypoint.sh` after awaiting PostgreSQL readiness.
+The Docker Compose stack runs two services:
+- **`backend`**: Python `3.12-slim` + Django `5.1.14` + Gunicorn (`backend/Dockerfile`) backed by an embedded SQLite3 database (WAL mode), automatically running migrations and `ensure_superuser` via `backend/entrypoint.sh` on startup.
 - **`frontend`**: Multi-stage Node `22-alpine` build + Nginx `1.27-alpine` (`frontend/Dockerfile` & `frontend/nginx.conf`), serving the compiled React SPA and reverse-proxying `/api/`, `/artifacts/`, `/admin/`, and `/django-static/` to `backend` while preserving `Host` and scheme headers for CSRF/session cookies.
 
 ### Externalizing All Persistent State (Zero Ephemeral User Data)
@@ -354,12 +350,12 @@ All application and user-created state lives outside the containers:
 
 | Mount / Volume | Container Mount | Persisted Data |
 | :--- | :--- | :--- |
-| `HOST_PG_DIR` *(default `./data/postgres`)* | `/var/lib/postgresql/data` | PostgreSQL tables: **`Customer`**, **`CustomerContact`**, **`Investigation`**, **`auth_user`**, **`UserProfile`**, **`django_session`**, **`authtoken_token`**, **`RelatedIncident`**, **`ExternalResearch`**, and **`EvidenceItem`** metadata. |
+| `HOST_DB_DIR` *(default `./data`)* | `/data/db` | SQLite3 database file `db.sqlite3` containing tables: **`Customer`**, **`CustomerContact`**, **`Investigation`**, **`auth_user`**, **`UserProfile`**, **`django_session`**, **`authtoken_token`**, **`RelatedIncident`**, **`ExternalResearch`**, and **`EvidenceItem`** metadata. |
 | `HOST_ARTIFACTS_DIR` *(default `./artifacts`)* | `/data/artifacts` | User profile **`avatars/`**, per-investigation folders, uploaded **`screenshots/`**, PCAPs, generated **`reports/`** (`.csv`, `.odt`, `.md`, `.zip`), and **`archive_manifest.json`**. |
 
 To store data on a dedicated attached storage volume (such as an AWS EBS volume mounted at `/mnt/incident-data`), set in `.env`:
 ```ini
-HOST_PG_DIR=/mnt/incident-data/postgres
+HOST_DB_DIR=/mnt/incident-data/db
 HOST_ARTIFACTS_DIR=/mnt/incident-data/artifacts
 ```
 
@@ -372,7 +368,7 @@ git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
 cd incident-reporter
 
 cp .env.example .env
-# Set DJANGO_SECRET_KEY (and optional POSTGRES_PASSWORD, HOST_ARTIFACTS_DIR, DJANGO_SUPERUSER_*)
+# Set DJANGO_SECRET_KEY (and optional HOST_DB_DIR, HOST_ARTIFACTS_DIR, DJANGO_SUPERUSER_*)
 
 docker compose up -d --build
 ```
@@ -383,13 +379,14 @@ docker compose up -d --build
 ### 2. Redeploying as a Clean Brand New Instance
 To completely wipe previous data and start fresh as a brand new instance:
 ```bash
-# 1. Stop existing containers and remove the old database volume
-docker compose down -v
+# 1. Stop existing containers
+docker compose down
 
-# 2. (Optional) Clear old investigation artifacts and PostgreSQL host directory if starting completely fresh
-rm -rf ./artifacts/* ./data/postgres/*
+# 2. Remove the SQLite database (and optionally old investigation artifacts)
+rm -f ./data/db.sqlite3*
+rm -rf ./artifacts/*
 
-# 3. Rebuild and launch the new PostgreSQL stack
+# 3. Rebuild and launch a fresh stack
 docker compose up -d --build
 ```
 
@@ -398,7 +395,14 @@ docker compose up -d --build
 git pull
 docker compose up -d --build
 ```
-Rebuilding replaces only the stateless container images and automatically applies any new Django schema migrations against PostgreSQL.
+Rebuilding replaces only the stateless container images and automatically applies any new Django schema migrations to the SQLite database.
+
+### 4. Backing Up the Database
+Because the database is a single file, a consistent online backup (safe while the app is running) is one command:
+```bash
+docker compose exec backend python -c "import sqlite3; s=sqlite3.connect('/data/db/db.sqlite3'); d=sqlite3.connect('/data/db/backup.sqlite3'); s.backup(d); d.close()"
+```
+Copy `data/backup.sqlite3` together with the `artifacts/` directory to capture the complete system state.
 
 ---
 

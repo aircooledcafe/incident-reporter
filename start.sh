@@ -16,23 +16,6 @@ if [ -z "${DJANGO_SECRET_KEY}" ]; then
   exit 1
 fi
 
-# Verify PostgreSQL is configured and reachable
-if [ -z "${POSTGRES_DB}" ]; then
-  echo "ERROR: POSTGRES_DB is not set in .env." >&2
-  exit 1
-fi
-
-PG_CHECK_HOST="${POSTGRES_HOST:-localhost}"
-if [ "$PG_CHECK_HOST" = "postgres" ]; then
-  PG_CHECK_HOST="localhost"
-  export POSTGRES_HOST="localhost"
-fi
-if ! nc -z "$PG_CHECK_HOST" "${POSTGRES_PORT:-5432}" 2>/dev/null; then
-  echo "ERROR: PostgreSQL is not reachable at $PG_CHECK_HOST:${POSTGRES_PORT:-5432}." >&2
-  echo "Start PostgreSQL or launch the full stack with: docker compose up --build -d" >&2
-  exit 1
-fi
-
 echo "Applying Django migrations & checking optional initial Super Admin..."
 "$ROOT_DIR/backend/.venv/bin/python" "$ROOT_DIR/backend/manage.py" migrate --noinput
 "$ROOT_DIR/backend/.venv/bin/python" "$ROOT_DIR/backend/manage.py" ensure_superuser

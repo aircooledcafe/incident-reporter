@@ -18,8 +18,8 @@ dist
 npm-debug.log*
 
 # Local persistent data & investigation artifacts (mounted via volumes at runtime)
-data/postgres/*
-!data/postgres/.gitkeep
+data/*
+!data/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
 

@@ -1,42 +1,16 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: incident-reporter-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: "${POSTGRES_DB:-incident_reporter}"
-      POSTGRES_USER: "${POSTGRES_USER:-soc_admin}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-soc_secure_pass}"
-      PGDATA: "/var/lib/postgresql/data/pgdata"
-    volumes:
-      # Dedicated/separate storage volume for PostgreSQL data (e.g. attached AWS EBS volume or local host path)
-      - "${HOST_PG_DIR:-./data/postgres}:/var/lib/postgresql/data"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-soc_admin} -d $${POSTGRES_DB:-incident_reporter}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: incident-reporter-backend
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       DJANGO_DEBUG: "${DJANGO_DEBUG:-False}"
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY must be set in .env or environment}"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
       DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-}"
-      POSTGRES_DB: "${POSTGRES_DB:-incident_reporter}"
-      POSTGRES_USER: "${POSTGRES_USER:-soc_admin}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-soc_secure_pass}"
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      DJANGO_DB_PATH: "/data/db/db.sqlite3"
       DJANGO_ARTIFACTS_ROOT: "${CONTAINER_ARTIFACTS_ROOT:-/data/artifacts}"
       DJANGO_SUPERUSER_USERNAME: "${DJANGO_SUPERUSER_USERNAME:-}"
       DJANGO_SUPERUSER_PASSWORD: "${DJANGO_SUPERUSER_PASSWORD:-}"
@@ -45,6 +19,8 @@ services:
     volumes:
       # Dedicated/separate storage volume for investigation folders, screenshots, PCAPs, and reports
       - "${HOST_ARTIFACTS_DIR:-./artifacts}:/data/artifacts"
+      # Dedicated/separate storage volume for the SQLite database file (e.g. attached AWS EBS volume or local host path)
+      - "${HOST_DB_DIR:-./data}:/data/db"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     healthcheck:

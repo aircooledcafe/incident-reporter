@@ -11,32 +11,30 @@ flowchart TD
     Internet([Users / SOC Analysts / Cloudflare Tunnel])
     
     subgraph VPC["AWS VPC (Public/Private Subnet)"]
-        subgraph EC2["AWS EC2 Instance (Ubuntu 24.04 LTS / t4g.small or t3.medium)"]
+        subgraph EC2["AWS EC2 Instance (Ubuntu 24.04 LTS / t4g.micro or t4g.small)"]
             subgraph Docker["Docker Compose Stack"]
                 Frontend["Nginx / React SPA (Port 5173)"]
-                Backend["Django 5.1 / Gunicorn (Port 8000)"]
-                Postgres["PostgreSQL 16 Alpine Container"]
+                Backend["Django 5.1 / Gunicorn + SQLite3 (Port 8000)"]
             end
         end
 
         subgraph EBS["Dedicated Attached EBS Volume (gp3)"]
-            PGData["/mnt/incident-data/postgres (PostgreSQL Data)"]
+            DBData["/mnt/incident-data/db (SQLite3 db.sqlite3)"]
             ArtifactsData["/mnt/incident-data/artifacts (PCAPs, Screenshots, Reports)"]
         end
     end
 
     Internet -->|HTTPS / Tunnel| Frontend
     Frontend --> Backend
-    Backend --> Postgres
-    Postgres -->|HOST_PG_DIR| PGData
+    Backend -->|HOST_DB_DIR| DBData
     Backend -->|HOST_ARTIFACTS_DIR| ArtifactsData
 ```
 
 ### Why This Architecture?
-- **Cost Effective**: Costs ~\$15–\$25/month on a `t4g.small` (ARM Graviton) or `t3.medium` instance.
-- **State Decoupling**: The OS root drive is completely stateless. All PostgreSQL tables and investigation artifacts live strictly on the dedicated EBS volume mounted to `/mnt/incident-data`.
+- **Cost Effective**: No separate database server — the embedded SQLite3 database runs inside the backend container. Comfortably serves a team of 5–10 analysts on a `t4g.micro` / `t4g.small` (ARM Graviton) instance for roughly \$8–\$18/month including storage (on-demand pricing; varies by region).
+- **State Decoupling**: The OS root drive is completely stateless. The SQLite database file and investigation artifacts live strictly on the dedicated EBS volume mounted to `/mnt/incident-data`.
 - **Zero Data Loss on Replacement**: If the EC2 instance is terminated, resized, or upgraded, the EBS volume remains intact. You can re-attach it to any new EC2 instance and run `docker compose up -d` in minutes.
-- **Instant Backups**: You can use AWS Data Lifecycle Manager (DLM) to take point-in-time EBS snapshots automatically without interrupting the application.
+- **Instant Backups**: You can use AWS Data Lifecycle Manager (DLM) to take point-in-time EBS snapshots automatically without interrupting the application (SQLite runs in WAL mode, so snapshots are crash-consistent and recover cleanly on next start).
 
 ---
 
@@ -53,8 +51,9 @@ flowchart TD
 ### 1. Launch the EC2 Instance
 - **AMI**: Ubuntu Server 24.04 LTS (64-bit x86 or ARM64).
 - **Instance Type**: 
-  - `t4g.small` (2 vCPU, 2 GiB RAM — ARM Graviton3, highly cost-efficient)
-  - OR `t3.medium` (2 vCPU, 4 GiB RAM — x86)
+  - `t4g.micro` (2 vCPU, 1 GiB RAM — ARM Graviton, lowest cost; sufficient for ~5 analysts)
+  - OR `t4g.small` (2 vCPU, 2 GiB RAM — ARM Graviton, extra headroom for report generation / PCAP uploads)
+  - *(x86 alternative: `t3.small`)*
 - **Root Volume**: Default 20 GiB `gp3` (for OS, Docker binaries, and system packages).
 - **Network / Security Group**:
   - Inbound SSH (Port 22) restricted to your IP.
@@ -132,16 +131,12 @@ df -h /mnt/incident-data
 
 ### 5. Create Data Directories & Set Permissions
 ```bash
-sudo mkdir -p /mnt/incident-data/postgres /mnt/incident-data/artifacts
+sudo mkdir -p /mnt/incident-data/db /mnt/incident-data/artifacts
 
-# PostgreSQL runs under UID 999 inside postgres:16-alpine
-sudo chown -R 999:999 /mnt/incident-data/postgres
-sudo chmod 700 /mnt/incident-data/postgres
-# (PostgreSQL cluster files are automatically created in /mnt/incident-data/postgres/pgdata)
-
-# Allow Docker container write permissions for artifacts
-sudo chown -R ubuntu:ubuntu /mnt/incident-data/artifacts
-sudo chmod 775 /mnt/incident-data/artifacts
+# Allow Docker container write permissions for the SQLite database and artifacts
+# (db.sqlite3 and its -wal/-shm companions are created automatically on first start)
+sudo chown -R ubuntu:ubuntu /mnt/incident-data/db /mnt/incident-data/artifacts
+sudo chmod 775 /mnt/incident-data/db /mnt/incident-data/artifacts
 ```
 
 ---
@@ -219,15 +214,8 @@ DJANGO_ALLOWED_HOSTS=*
 # If using Cloudflare Tunnel or custom domain:
 DJANGO_CSRF_TRUSTED_ORIGINS=https://soc.yourcompany.com,https://*.trycloudflare.com
 
-# PostgreSQL Credentials
-POSTGRES_DB=incident_reporter
-POSTGRES_USER=soc_admin
-POSTGRES_PASSWORD=GENERATE_STRONG_DATABASE_PASSWORD_HERE
-POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
-
 # Dedicated Attached EBS Storage Paths
-HOST_PG_DIR=/mnt/incident-data/postgres
+HOST_DB_DIR=/mnt/incident-data/db
 HOST_ARTIFACTS_DIR=/mnt/incident-data/artifacts
 
 # Ports & Workers
@@ -316,4 +304,4 @@ If the EC2 instance ever fails or needs replacement:
 2. In AWS Console, attach your existing EBS volume (`incident-reporter-storage`) to the new instance.
 3. SSH into the new instance, mount `/mnt/incident-data` via `/etc/fstab`.
 4. Install Docker, clone the repo, copy your `.env`, and run `docker compose up -d`.
-5. All PostgreSQL databases, users, investigations, and uploaded artifacts are restored immediately with zero data loss.
+5. The SQLite database (users, investigations, timeline evidence) and all uploaded artifacts are restored immediately with zero data loss.

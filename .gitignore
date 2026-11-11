@@ -21,9 +21,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Mapped Docker Database & Investigation Artifacts (keep folders, ignore local data)
-data/postgres/*
-!data/postgres/.gitkeep
+# Mapped SQLite Database & Investigation Artifacts (keep folders, ignore local data)
+data/*
+!data/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
 
