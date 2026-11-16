@@ -1,446 +1,124 @@
-# SOC Investigations
+# SOC Incident Response Evidence & Timeline Reporter
 
-A tool for SOC analysts to manage security incidents — allowing them to collect evidence, build chronological timelines, and generate investigation report outlines.
+A web-based incident response investigation tool designed for SOC teams to record evidence, build chronological event timelines with MITRE ATT&CK mappings, and generate formatted reports.
 
 ---
 
-## Quick Start
+## Quick Start (Docker Compose)
 
-### Option A: Docker Compose (Recommended)
+### 1. Clone & Configure
 ```bash
 git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
 cd incident-reporter
 
 cp .env.example .env
-# Generate and write DJANGO_SECRET_KEY into .env:
-python3 -c 'import pathlib, secrets; p=pathlib.Path(".env"); p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={secrets.token_urlsafe(50)}"))'
+```
 
+Generate a secure key using `openssl` and paste it into `.env` as `DJANGO_SECRET_KEY`:
+```bash
+openssl rand -base64 48
+```
+
+### 2. Build & Launch
+```bash
 docker compose up -d --build
 ```
-Open **`http://localhost:5173`** in your browser. On first launch, you will be prompted to create the initial **Super Admin** account.
 
-### Option B: Local Run (Python + Node.js)
-```bash
-cp .env.example .env
-python3 -c 'import pathlib, secrets; p=pathlib.Path(".env"); p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={secrets.token_urlsafe(50)}"))'
+- **Web Application**: `http://localhost:5173`
+- **Backend API**: `http://localhost:8000/api/`
+- **Django Database Admin**: `http://localhost:5173/admin/` *(Super Admin only)*
 
-cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd ..
-cd frontend && npm install --legacy-peer-deps && cd ..
-
-./start.sh
-```
-Open **`http://localhost:5173`** (`http://localhost:8000` for the backend API).
+On first launch, opening `http://localhost:5173` automatically prompts you to create the initial **Super Admin** account.
 
 ---
 
-## Screenshots & Example Reports (`samples/`)
+## Core Features
 
-The [`samples/`](samples/) directory includes UI walkthrough screenshots as well as **example exported investigation reports** generated directly from the tool:
-
-- **Example Full Timeline CSV Report**: [`samples/2026-10-30_CUST-19990_SOC-2026-0101_3.csv`](samples/2026-10-30_CUST-19990_SOC-2026-0101_3.csv)
-- **Example Key Evidence OpenDocument (`.odt`) Report**: [`samples/2026-10-30_CUST-19990_SOC-2026-0101_3.odt`](samples/2026-10-30_CUST-19990_SOC-2026-0101_3.odt)
-
-### SOC Investigation Overview (Homepage)
-![SOC Investigation Overview Homepage](samples/01-soc-investigation-overview.png)
-
-### Investigation Workspace — Overview Tab
-![Investigation Workspace Overview](samples/02-investigation-workspace-overview.png)
-
-### Investigation Workspace — Evidence Timeline Tab
-![Evidence Timeline Tab](samples/03-evidence-timeline.png)
-
-### Evidence Item Details Popup (Key Evidence & Attached Screenshot)
-![Evidence Item Details Popup with Screenshot](samples/04-evidence-item-details-key.png)
-
-### Evidence Item Details Popup (Defanged Command & MITRE ATT&CK Mappings)
-![Evidence Item Details Popup Commands](samples/05-evidence-item-details-commands.png)
-
-### Investigation Workspace — Report Generation & Live Preview
-![Report Generation and Key Evidence Report Preview](samples/06-report-generation-preview.png)
+- **Investigation Management**: Customer-centric investigations with status tracking (`Triage`, `Investigating`, `Awaiting Customer`, `Contained`, `Closed`), actionable next steps, escalation contacts, and read-only investigation locking.
+- **Evidence Timeline**: Record **Atomic Events** and **Search Patterns** with analyst attribution, scoped defanging (assets, IPs, domains, hashes), and MITRE ATT&CK tactic/technique tagging.
+- **Artifacts & Attachments**: Dedicated per-investigation disk folders for screenshots, PCAPs, and exported reports, with automatic filesystem cleanup when items or investigations are removed.
+- **Report Generation**: Export full timeline `.csv` files and formatted Key Evidence reports in `.odt` (OpenDocument Text) and `.md` (Markdown with screenshot `.zip` bundle).
+- **Four-Tier RBAC**: Built-in Django authentication supporting `Super Admin`, `Admin`, `Analyst`, and `Executive` roles with custom profile avatars and granular permissions.
+- **REST API**: Comprehensive token-authenticated API for SIEM/SOAR integrations and programmatic ingestion.
 
 ---
 
-## Technology Stack & Pinned Versions
-
-- **Backend**: Python (`>=3.10`) + **Django `5.1.14`** + Django Built-In Authentication (`django.contrib.auth`) + Django REST Framework (`3.17.2`) + `django-cors-headers` (`4.9.0`) + `odfpy` (`1.4.1`) + `Pillow` (`13.0.0`) + `gunicorn` (`23.0.0`)
-- **Frontend**: **React `19.2.6`** (`react-dom@19.2.6`) + **`react-bootstrap@2.10.10`** + **`@restart/hooks@0.4.16`** + Vite (`6.x`) + Nginx (`1.27-alpine` in Docker)
-
----
-
-## Key Features
-
-1. **SOC Investigation Overview Homepage (Default View)**
-   - Displays an at-a-glance overview of **current open investigations** by default, surfacing **Customer**, **Ticket Links**, **Related Escalated Incident Links**, **Investigation Summary**, and **Analyst Action Plan**, with green **New Investigation** action buttons.
-   - Includes instant filter toggles for **Open**, **All**, **Archived**, and **Locked** investigations, plus ordering controls (**Chronological Newest/Oldest** and **Customer Name A→Z / Z→A**) and keyword search.
-
-2. **Django Built-In Authentication, User Profiles & Four-Tier RBAC**
-   - Backed directly by Django's `django.contrib.auth` (`auth_user`, password validators, database-backed `django_session`, and DRF `authtoken_token`) paired with `UserProfile` roles: **Super Admin**, **Admin**, **Analyst**, and **Executive**.
-   - **User Name Dropdown Menu & Personalization**: The top navigation user button displays your **avatar**, **preferred display name**, and **role** (without cluttering the top bar with pronouns). Clicking your user name opens a dropdown for **Account, Avatar & Preferences**, **User & Role Management** (Admin / Super Admin), **Django Database Admin** (Super Admin), and **Sign Out**. Users can upload/remove a **profile avatar**, set a **preferred display name**, specify their **SOC role / job title** (`job_role`), and set **pronouns**.
-   - **Investigation Locking (Read-Only Mode)**: **Admin** and **Super Admin** users can lock any investigation to freeze it as read-only (and unlock it when needed). Both **Locked** and **Archived** investigations are hidden from the workspace sidebar by default until toggled on.
-   - **Super Admin Themed Demo Scenarios**: **Super Admin** accounts have exclusive access to **Load Sample Incident**, featuring four complete demonstration scenarios (*The Expanse* VPN/AD intrusion, *Star Trek* website compromise & web shells, *The Matrix* ClickFix to Domain Controller takeover, and *Star Wars* MitM phishing, spam wave & multi-account takeover).
-
-3. **Investigation Workspace (`Overview`, `Evidence Timeline`, `Report Generation`)**
-   - **Overview**: Supports **Title**, **Customer Name**, **Customer ID**, **Ticket ID**, **Ticket Link**, **Summary of Investigation**, **Action Plan** (free-form next steps, investigation areas, and customer requests), **Related Escalated Incidents** (titles + links), **Key Customer Contacts** (name, role/title, email, phone, notes + bridge notes), **Key Assets Affected**, **Key Users Affected**, **Key Malicious Indicators**, and **External Research** links & summaries.
-   - Automatically provisions a dedicated archive folder (`artifacts/project_<id>_<slug>/`) containing `screenshots/`, `reports/`, and a live-synced `archive_manifest.json`.
-   - Investigation status management (`Triage`, `Investigating`, `Awaiting Customer`, `Contained`, `Closed`) with a header status picker, confirmation warning when closing, and sidebar switches for **Show Closed** and **Show Locked**.
-
-4. **Streamlined Evidence Timeline, Click-to-Inspect Detail Popup & MITRE Multi-Select**
-   - **Clean Timeline View + Full Detail Popup**: The **Evidence Timeline** table focuses on **Key** status, **Timestamp (UTC)**, **Asset & User**, **Summary & Indicators**, and **Links**. Clicking any row opens a comprehensive **Evidence Item Details** popup displaying every recorded detail (analyst attribution, evidence type, timestamps, defanged assets/indicators/commands, MITRE ATT&CK Tactics & Techniques, links, and attached screenshots).
-   - **Protected Timeline Deletion & Warning Confirmation**: Deleting any timeline item prompts a confirmation warning dialog and is strictly restricted to the **user who created the item**, an **Admin**, or a **Super Admin** (on unlocked investigations).
-   - **MITRE ATT&CK Multi-Select Dropdowns**: Evidence items feature multi-select menus for Enterprise **MITRE Tactics** and **MITRE Techniques**, dynamically filtering relevant techniques for the selected tactic(s) and pairing them in report summary tables.
-   - **Scoped Defanging**: Automatically defangs affected or malicious assets, hostnames, domains, files, IPs, and URLs (`192.168[.]1.1`, `domain[.]com`, `hxxps[:]//`, `payload[.]exe`) while keeping analyst-provided links intact and clickable.
-
-5. **Investigation Report Exports & Standardized Filenames**
-   - Exported files use the investigation's creation date and metadata in the format:
-     `date_customer_id_ticket_investigation_id.<ext>` (e.g., `2026-10-30_CUST-100_INC-500_1.csv`), automatically omitting the ticket segment (`date_customer_id_investigation_id.<ext>`) when no ticket ID is present.
-   - **Report 1 — Investigation Evidence Timeline (`.csv`)**: Time-ordered CSV export of **all** recorded investigation evidence items, including multi-selected MITRE ATT&CK Tactics and Techniques.
-   - **Report 2 — Investigation Key Evidence Report (`.odt` OpenDocument Text & `.md` Markdown / `.zip`)**:
-     - Includes **only items flagged as Key Evidence**, ordered chronologically, with embedded screenshots and three **Investigation Summary Tables at the bottom** (*Key Assets Affected*, *Key Malicious Indicators*, and *MITRE Tactics and Techniques*).
-     - The Markdown export automatically creates a dedicated `key_evidence_screenshots_investigation_<id>/` folder alongside the `.md` report (also downloadable as a `.zip` bundle).
-
----
-
-## Authentication & User Roles
-
-Authentication uses Django's built-in `django.contrib.auth` session and password-hashing framework for the web interface, plus DRF Token authentication for automated SOC ingestion scripts. All endpoints and `/artifacts/` media downloads require an authenticated, active account.
-
-### Role Hierarchy & Permissions Matrix
-
-| Capability | Executive (`EXECUTIVE`) | Analyst (`ANALYST`) | Admin (`ADMIN`) | Super Admin (`SUPER_ADMIN`) |
-| :--- | :---: | :---: | :---: | :---: |
-| Sign in, sign out, & change own password | Yes | Yes | Yes | Yes |
-| Upload avatar, set preferred display name, & set pronouns | Yes | Yes | Yes | Yes |
-| View Homepage, projects, timelines, contacts, & screenshots | Yes | Yes | Yes | Yes |
-| Export CSV, ODT, Markdown, & ZIP reports | Yes | Yes | Yes | Yes |
-| Create projects & modify unlocked investigations / action plans | No | Yes | Yes | Yes |
-| Generate API token & push via `/api/soc/ingest/` *(unlocked projects)* | No | Yes | Yes | Yes |
-| **Lock / Unlock** projects (read-only toggle) | No | No | **Yes** | **Yes** |
-| **Delete** projects *(must be unlocked first)* | No | No | **Yes** | **Yes** |
-| Create **Analyst** & **Executive** users | No | No | **Yes** | **Yes** |
-| Assign roles (`ANALYST` / `EXECUTIVE`), enable/disable, & reset passwords for lesser users | No | No | **Yes** | **Yes** |
-| Create & manage **Admin** / **Super Admin** users | No | No | **No** | **Yes** |
-| **Load Sample Incidents** (*Expanse*, *Star Trek*, *Matrix*, *Star Wars*) | No | No | **No** | **Yes** |
-| Access Django `/admin/` raw database administration | No | No | **No** | **Yes** |
-
-### Bootstrapping the Initial Super Admin Account
-
-No credentials or secrets are hardcoded in the codebase. You can create the first **Super Admin** account using any of three methods:
-
-1. **Interactive Web Setup (First Run)**: If the database has zero users, opening the web UI automatically displays an **Initial Super Admin Setup** screen. Once the first user is created, this setup endpoint (`/api/auth/setup/`) is permanently disabled.
-2. **Environment Variables (Automated Docker Bootstrap)**: Set `DJANGO_SUPERUSER_USERNAME` and `DJANGO_SUPERUSER_PASSWORD` (and optional `DJANGO_SUPERUSER_EMAIL`) in `.env`. On container startup, `python manage.py ensure_superuser` idempotently creates the Super Admin account if it does not yet exist.
-3. **Django CLI**:
-   ```bash
-   # In Docker:
-   docker compose exec backend python manage.py createsuperuser
-
-   # Locally:
-   cd backend && .venv/bin/python manage.py createsuperuser
-   ```
-   Any user created via `createsuperuser` automatically receives the `SUPER_ADMIN` role profile.
-
----
-
-## Database Structure Overview
-
-All relational data—including Django's built-in user accounts, role profiles, active sessions, API tokens, customers, investigations, lock metadata, research links, timeline evidence, and attachment references—is stored in a single SQLite3 database file (`DJANGO_DB_PATH`), while binary screenshots, PCAPs, exported reports, and JSON archive manifests are persisted in `DJANGO_ARTIFACTS_ROOT`.
-
-```mermaid
-erDiagram
-    auth_user ||--|| UserProfile : "has role & profile (profile)"
-    auth_user ||--o| authtoken_token : "has API token"
-    auth_user ||--o{ Project : "locks (locked_projects)"
-    auth_user ||--o{ EvidenceItem : "creates (created_evidence_items)"
-    auth_user ||--o{ EvidenceScreenshot : "uploads (created_evidence_screenshots)"
-    auth_user ||--o{ EvidencePcap : "uploads (created_evidence_pcaps)"
-    Project ||--o{ RelatedIncident : "has many (related_incidents)"
-    Project ||--o{ CustomerContact : "has many (customer_contacts)"
-    Project ||--o{ ExternalResearch : "has many (external_research_items)"
-    Project ||--o{ EvidenceItem : "has many (evidence_items)"
-    EvidenceItem ||--o{ EvidenceScreenshot : "has many (screenshots)"
-    EvidenceItem ||--o{ EvidencePcap : "has many (pcaps)"
-
-    auth_user {
-        int id PK
-        string username UK
-        string password "PBKDF2 hashed"
-        string first_name
-        string last_name
-        string email
-        boolean is_active
-        boolean is_staff "True only for SUPER_ADMIN"
-        boolean is_superuser "True only for SUPER_ADMIN"
-        datetime last_login
-        datetime date_joined
-    }
-
-    UserProfile {
-        int id PK
-        int user_id FK "OneToOne -> auth_user"
-        string role "SUPER_ADMIN | ADMIN | ANALYST | EXECUTIVE"
-        string preferred_display_name
-        string job_role "User SOC / team role title"
-        string pronouns
-        file avatar "Stored under artifacts/avatars/"
-        datetime created_at
-        datetime updated_at
-    }
-
-    django_session {
-        string session_key PK
-        text session_data "Encrypted/signed user session"
-        datetime expire_date
-    }
-
-    authtoken_token {
-        string key PK
-        int user_id FK "OneToOne -> auth_user"
-        datetime created
-    }
-
-    Project {
-        int id PK
-        string title
-        string customer_name
-        string customer_id
-        string ticket_id
-        string ticket_link
-        text summary
-        text action_plan "Free-form next steps & customer requests"
-        text key_customer_contacts "Bridge / general escalation notes"
-        text key_assets_affected
-        text key_users_affected
-        text key_malicious_indicators
-        string status "OPEN | INVESTIGATING | CONTAINED | ARCHIVED"
-        boolean is_locked "Read-only flag managed by Admin / Super Admin"
-        int locked_by_id FK "Nullable -> auth_user"
-        datetime locked_at
-        string lead_analyst
-        string artifact_folder "e.g. project_1_tycho-intrusion"
-        datetime created_at
-        datetime updated_at
-    }
-
-    RelatedIncident {
-        int id PK
-        int project_id FK
-        string title
-        string link
-        string analyst_name
-        datetime created_at
-    }
-
-    CustomerContact {
-        int id PK
-        int project_id FK
-        string name
-        string role_title
-        string email
-        string phone
-        text notes
-        datetime created_at
-    }
-
-    ExternalResearch {
-        int id PK
-        int project_id FK
-        string link
-        text summary
-        string analyst_name
-        datetime created_at
-    }
-
-    EvidenceItem {
-        int id PK
-        int project_id FK
-        int created_by_id FK "Nullable -> auth_user (creator)"
-        string evidence_type "ATOMIC | SEARCH"
-        string analyst_name
-        datetime timestamp "Event time (ATOMIC) or Start time (SEARCH)"
-        datetime end_timestamp "End time (SEARCH only)"
-        text summary
-        string affected_asset
-        string affected_user
-        boolean user_created_by_attacker
-        text malicious_hosts_ips
-        text commands_run
-        text mitre_tactic "Multi-select (; delimited)"
-        text mitre_technique "Multi-select (; delimited)"
-        string related_log_link
-        string search_result_link
-        string search_query_link
-        text notes
-        boolean is_key_evidence
-        datetime created_at
-        datetime updated_at
-    }
-
-    EvidenceScreenshot {
-        int id PK
-        int evidence_id FK
-        int created_by_id FK "Nullable -> auth_user (uploader)"
-        file image "Stored under artifacts/<project_folder>/screenshots/"
-        string caption
-        string analyst_name
-        datetime uploaded_at
-    }
-
-    EvidencePcap {
-        int id PK
-        int evidence_id FK
-        int created_by_id FK "Nullable -> auth_user (uploader)"
-        file file "Stored under artifacts/<project_folder>/pcaps/"
-        string description
-        string analyst_name
-        datetime uploaded_at
-    }
-```
-
-### Storage & Relational Behavior
-- **Built-In Auth + `UserProfile`**: Uses Django's native `auth_user` table with a `1:1` `UserProfile` table storing the application role (`SUPER_ADMIN`, `ADMIN`, `ANALYST`, `EXECUTIVE`). `is_staff` and `is_superuser` are automatically synchronized so **only** `SUPER_ADMIN` can access `/admin/` to make direct database changes.
-- **Database-Backed Sessions & Tokens**: User login sessions (`django_session` via `SESSION_ENGINE = 'django.contrib.sessions.backends.db'`) and SOC ingestion API tokens (`authtoken_token`) live inside the persistent SQLite database rather than container memory.
-- **Cascading Cleanup & Disk Synchronization**:
-  - `ExternalResearch` and `EvidenceItem` cascade on `Investigation` deletion; `EvidenceScreenshot` cascades on `EvidenceItem` deletion and removes its image file from disk.
-  - Deleting an unlocked `Investigation` (Admin / Super Admin only) also cleans up its `artifacts/<investigation_folder>/` directory.
-  - Saving an `Investigation`, `EvidenceItem`, `ExternalResearch`, or `EvidenceScreenshot` writes an updated `archive_manifest.json` snapshot into `artifacts/<investigation_folder>/`.
-
----
-
-## Required Secrets & Environment Variables (`.env`)
-
-Before starting the application (with Docker Compose or locally), copy `.env.example` to `.env` and set **`DJANGO_SECRET_KEY`**.
+## Configuration (`.env`)
 
 | Variable | Required | Default | Description |
 | :--- | :---: | :--- | :--- |
-| `DJANGO_SECRET_KEY` | **Yes** | *(None — refuses to start if unset)* | Cryptographic secret key used by Django for signing sessions, CSRF tokens, and password reset hashes. |
-| `DJANGO_DEBUG` | No | `False` | Enables Django debug mode (`True` or `False`). Keep `False` in production/Docker. |
-| `DJANGO_ALLOWED_HOSTS` | No | `*` | Comma-separated list of allowed hostnames/IPs (e.g., `localhost,127.0.0.1,192.168.1.50`). |
-| `DJANGO_CSRF_TRUSTED_ORIGINS` | No | *(Empty)* | Comma-separated trusted origins when accessed via reverse proxy / HTTPS (e.g., `https://ir.corp.example`). |
-| `DJANGO_DB_PATH` | No | `./data/db.sqlite3` (local) / `/data/db/db.sqlite3` (Docker) | Path to the SQLite3 database file. Set automatically by Docker Compose. |
-| `HOST_DB_DIR` | No | `./data` | Host or attached EBS volume directory mounted to `/data/db` in Docker (holds `db.sqlite3` and its `-wal`/`-shm` files). |
-| `HOST_ARTIFACTS_DIR` | No | `./artifacts` | External/host directory mounted to `/data/artifacts` in Docker (stores all investigation folders, uploaded screenshots, manifests, and generated `.csv`/`.odt`/`.md`/`.zip` reports). |
-| `DJANGO_SUPERUSER_USERNAME` | No | *(Empty)* | Optional initial Super Admin username created on startup by `ensure_superuser`. |
-| `DJANGO_SUPERUSER_PASSWORD` | No | *(Empty)* | Optional initial Super Admin password created on startup by `ensure_superuser`. |
-| `DJANGO_SUPERUSER_EMAIL` | No | *(Empty)* | Optional initial Super Admin email address. |
-| `APP_PORT` | No | `5173` | Host port exposed by the Nginx frontend container in Docker Compose. |
-| `BACKEND_PORT` | No | `8000` | Host port exposed by the Gunicorn backend container in Docker Compose. |
-| `GUNICORN_WORKERS` | No | `3` | Number of Gunicorn worker processes inside the backend container. |
-
-### Initial Secret Setup (One-Liner)
-```bash
-cp .env.example .env
-python3 -c '
-import pathlib, secrets
-p = pathlib.Path(".env")
-p.write_text(p.read_text().replace("DJANGO_SECRET_KEY=", f"DJANGO_SECRET_KEY={secrets.token_urlsafe(50)}"))
-'
-```
-*(Alternatively, run `openssl rand -base64 48` and paste the output after `DJANGO_SECRET_KEY=` inside `.env`.)*
+| `DJANGO_SECRET_KEY` | **Yes** | *(None)* | Cryptographic signing key. Generate with `openssl rand -base64 48`. |
+| `DJANGO_DEBUG` | No | `False` | Debug mode. Keep `False` in production. |
+| `DJANGO_ALLOWED_HOSTS` | No | `*` | Comma-separated allowed hostnames or IPs. |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | No | *(Empty)* | Trusted origins when running behind HTTPS reverse proxies. |
+| `HOST_DB_DIR` | No | `./data` | Host directory mounted to `/data/db` for the SQLite database. |
+| `HOST_ARTIFACTS_DIR` | No | `./artifacts` | Host directory mounted to `/data/artifacts` for evidence files and reports. |
+| `DJANGO_SUPERUSER_USERNAME` | No | *(Empty)* | Optional username for automated Super Admin creation on startup. |
+| `DJANGO_SUPERUSER_PASSWORD` | No | *(Empty)* | Optional password for automated Super Admin creation on startup. |
+| `DJANGO_SUPERUSER_EMAIL` | No | *(Empty)* | Optional email for automated Super Admin creation on startup. |
+| `APP_PORT` | No | `5173` | Host port for the frontend Nginx web server. |
+| `BACKEND_PORT` | No | `8000` | Host port for the backend API. |
+| `GUNICORN_WORKERS` | No | `3` | Gunicorn worker process count. |
 
 ---
 
-## Docker Deployment & Non-Ephemeral External Storage
+## Persistent Storage & Backups
 
-The Docker Compose stack runs two services:
-- **`backend`**: Python `3.12-slim` + Django `5.1.14` + Gunicorn (`backend/Dockerfile`) backed by an embedded SQLite3 database (WAL mode), automatically running migrations and `ensure_superuser` via `backend/entrypoint.sh` on startup.
-- **`frontend`**: Multi-stage Node `22-alpine` build + Nginx `1.27-alpine` (`frontend/Dockerfile` & `frontend/nginx.conf`), serving the compiled React SPA and reverse-proxying `/api/`, `/artifacts/`, `/admin/`, and `/django-static/` to `backend` while preserving `Host` and scheme headers for CSRF/session cookies.
+All state is externalized to the host filesystem:
 
-### Externalizing All Persistent State (Zero Ephemeral User Data)
+- **`HOST_DB_DIR` (`./data`)**: Stores `db.sqlite3` with Write-Ahead Logging (`WAL`) enabled for fast, concurrent reads and writes.
+- **`HOST_ARTIFACTS_DIR` (`./artifacts`)**: Stores evidence screenshots, PCAPs, user avatars, and exported reports.
 
-All application and user-created state lives outside the containers:
-
-| Mount / Volume | Container Mount | Persisted Data |
-| :--- | :--- | :--- |
-| `HOST_DB_DIR` *(default `./data`)* | `/data/db` | SQLite3 database file `db.sqlite3` containing tables: **`Customer`**, **`CustomerContact`**, **`Investigation`**, **`auth_user`**, **`UserProfile`**, **`django_session`**, **`authtoken_token`**, **`RelatedIncident`**, **`ExternalResearch`**, and **`EvidenceItem`** metadata. |
-| `HOST_ARTIFACTS_DIR` *(default `./artifacts`)* | `/data/artifacts` | User profile **`avatars/`**, per-investigation folders, uploaded **`screenshots/`**, PCAPs, generated **`reports/`** (`.csv`, `.odt`, `.md`, `.zip`), and **`archive_manifest.json`**. |
-
-To store data on a dedicated attached storage volume (such as an AWS EBS volume mounted at `/mnt/incident-data`), set in `.env`:
-```ini
-HOST_DB_DIR=/mnt/incident-data/db
-HOST_ARTIFACTS_DIR=/mnt/incident-data/artifacts
-```
-
-> [!TIP]
-> For a complete, step-by-step guide to provisioning and mounting a dedicated persistent AWS EBS volume, setting up automated daily snapshots, and zero-port Cloudflare Tunnel ingress on EC2, see **[DEPLOYMENT_AWS.md](file:///Users/ben/incident-reporter/DEPLOYMENT_AWS.md)**.
-
-### 1. Build and Start with Docker Compose
-```bash
-git clone git@github.com:aircooledcafe/incident-reporter.git incident-reporter
-cd incident-reporter
-
-cp .env.example .env
-# Set DJANGO_SECRET_KEY (and optional HOST_DB_DIR, HOST_ARTIFACTS_DIR, DJANGO_SUPERUSER_*)
-
-docker compose up -d --build
-```
-- **Web Application (Nginx + React)**: `http://<SERVER_IP>:5173`
-- **Super Admin Django DB Interface**: `http://<SERVER_IP>:5173/admin/` *(restricted strictly to `SUPER_ADMIN` accounts)*
-- **Direct Backend API**: `http://<SERVER_IP>:8000/api/`
-
-### 2. Redeploying as a Clean Brand New Instance
-To completely wipe previous data and start fresh as a brand new instance:
-```bash
-# 1. Stop existing containers
-docker compose down
-
-# 2. Remove the SQLite database (and optionally old investigation artifacts)
-rm -f ./data/db.sqlite3*
-rm -rf ./artifacts/*
-
-# 3. Rebuild and launch a fresh stack
-docker compose up -d --build
-```
-
-### 3. Updating Containers Without Data Loss
-```bash
-git pull
-docker compose up -d --build
-```
-Rebuilding replaces only the stateless container images and automatically applies any new Django schema migrations to the SQLite database.
-
-### 4. Backing Up the Database
-Because the database is a single file, a consistent online backup (safe while the app is running) is one command:
+### Online Database Backup
+Create a consistent, safe backup while the application is actively running:
 ```bash
 docker compose exec backend python -c "import sqlite3; s=sqlite3.connect('/data/db/db.sqlite3'); d=sqlite3.connect('/data/db/backup.sqlite3'); s.backup(d); d.close()"
 ```
-Copy `data/backup.sqlite3` together with the `artifacts/` directory to capture the complete system state.
+Copy `data/backup.sqlite3` together with `./artifacts/` for a complete backup.
+
+### Fresh Instance Reset
+To wipe existing data and start completely fresh:
+```bash
+docker compose down
+rm -f ./data/db.sqlite3*
+rm -rf ./artifacts/*
+docker compose up -d --build
+```
 
 ---
 
-## Local Development Guide (Without Docker)
+## Local Development (Without Docker)
 
 ### Prerequisites
-- **Python** `3.10+`
-- **Node.js** `18+` and **npm**
+- Python 3.10+
+- Node.js 18+ and npm
 
-### 1. Backend Setup
+### 1. Setup Backend
 ```bash
 cp .env.example .env
-# Set DJANGO_SECRET_KEY in .env
+# Set DJANGO_SECRET_KEY in .env (generate with openssl rand -base64 48)
 
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-.venv/bin/python manage.py migrate
+python manage.py migrate
 cd ..
 ```
 
-### 2. Frontend Setup
+### 2. Setup Frontend
 ```bash
 cd frontend
 npm install --legacy-peer-deps
 cd ..
 ```
 
-### 3. Start Locally
+### 3. Run Application
 ```bash
 ./start.sh
 ```
-- **Frontend UI**: `http://localhost:5173`
-- **Backend API**: `http://localhost:8000`
 
-### 4. Automated Test Suite
-Runs 19 comprehensive test cases covering defanging, authentication, initial setup bootstrap, user profile avatars/preferred display names/pronouns, Executive/Analyst/Admin/Super Admin RBAC boundaries, Super Admin sample incident seeding, `/admin/` database restriction, project locking/unlocking, action plans, related escalated incidents, customer contacts, bulk evidence creation, timeline auto-sync, project deletion cleanup, protected `/artifacts/` media serving, CSV/ODT/Markdown report generation, and SOC API token ingestion:
+### 4. Run Test Suite
 ```bash
 cd backend
 .venv/bin/python manage.py test investigations
@@ -448,11 +126,9 @@ cd backend
 
 ---
 
-## REST API & Programmatic Ingestion
+## Documentation & Reference
 
-Incident Reporter includes a full-featured REST API for programmatic investigation lifecycle management, atomic bulk evidence ingestion, SIEM/SOAR alert webhooks, customer directory automation, and report exports. API requests are authenticated via persistent API tokens (`Authorization: Token <YOUR_TOKEN>`) with strict role-based access control (RBAC).
-
-> [!NOTE]
-> For the complete API documentation, endpoint reference, JSON schemas, atomic bulk ingestion formats, and ready-to-run Python/cURL automation scripts, see the dedicated specification:
->
-> 📄 **[Comprehensive REST API Specification (`API_SPECIFICATION.md`)](file:///Users/ben/incident-reporter/API_SPECIFICATION.md)**
+- 📄 **[AWS Production Deployment Guide (`DEPLOYMENT_AWS.md`)](DEPLOYMENT_AWS.md)** — Step-by-step EC2 setup, EBS persistence, and Cloudflare Tunnel guide.
+- 📄 **[REST API Specification (`API_SPECIFICATION.md`)](API_SPECIFICATION.md)** — Full endpoint schemas and ingestion scripts.
+- 📄 **[Software Bill of Materials (`BOM.md`)](BOM.md)** — Component inventory and license compliance.
+- 📄 **[Theme & Color System (`theme.md`)](theme.md)** — LevelBlue design tokens, status badges, and UI palette.
