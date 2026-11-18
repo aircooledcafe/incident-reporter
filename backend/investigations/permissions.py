@@ -60,7 +60,6 @@ def build_user_permissions_summary(user) -> dict:
         ),
         "can_manage_admins": role == UserProfile.ROLE_SUPER_ADMIN,
         "can_access_db_admin": role == UserProfile.ROLE_SUPER_ADMIN,
-        "can_seed_demo": role == UserProfile.ROLE_SUPER_ADMIN,
     }
 
 
@@ -216,7 +215,6 @@ def assert_can_delete_pcap(user, pcap) -> None:
 
 class InvestigationAccessPermission(permissions.BasePermission):
     """
-    - demo_scenarios / seed_demo: SUPER_ADMIN only.
     - Safe methods (GET/HEAD/OPTIONS, including timeline & report exports): all authenticated users.
     - lock / unlock / destroy: ADMIN and SUPER_ADMIN only.
     - create / update / partial_update: ANALYST, ADMIN, and SUPER_ADMIN.
@@ -228,13 +226,6 @@ class InvestigationAccessPermission(permissions.BasePermission):
             return False
 
         action_name = getattr(view, 'action', None)
-        if action_name in ('seed_demo', 'demo_scenarios'):
-            if not is_super_admin(user):
-                raise PermissionDenied(
-                    "Only Super Admin users can load sample demonstration investigations."
-                )
-            return True
-
         if request.method in permissions.SAFE_METHODS:
             return bool(get_user_role(user))
 

@@ -159,7 +159,6 @@ All investigation endpoints accept human-usable **Investigation IDs in format `I
 | `DELETE` | `/api/investigations/{INV123456}/` | Delete investigation and purge associated artifacts (Admin / Super Admin only; unlocked only). |
 | `POST` | `/api/investigations/{INV123456}/lock/` | Lock investigation to read-only state (Admin / Super Admin only). |
 | `POST` | `/api/investigations/{INV123456}/unlock/` | Unlock investigation for edits (Admin / Super Admin only). |
-| `POST` | `/api/investigations/seed_demo/` | Seed sample scenario: `{"scenario": "expanse" \| "matrix" \| "god_of_war" \| "all"}` (Super Admin only). |
 | `GET` | `/api/investigations/{INV123456}/export_csv/` | Export CSV timeline attachment. |
 | `GET` | `/api/investigations/{INV123456}/report_md/` | Export Markdown report attachment (`?bundle=true` downloads full ZIP bundle with images). |
 | `GET` | `/api/investigations/{INV123456}/report_odt/` | Export LibreOffice / Word `.odt` report document. |

@@ -10,7 +10,6 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .demo_scenarios import DEMO_SCENARIO_CATALOG, create_demo_scenario
 from .mitre_catalog import MITRE_TACTICS_WITH_TECHNIQUES
 from .models import (
     Customer,
@@ -307,38 +306,6 @@ class InvestigationViewSet(viewsets.ModelViewSet):
         response = HttpResponse(md_bytes, content_type='text/markdown; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
-
-    @action(detail=False, methods=['get'])
-    def demo_scenarios(self, request):
-        """Returns the catalog of Super Admin-only sample investigation scenarios."""
-        return Response(DEMO_SCENARIO_CATALOG)
-
-    @action(detail=False, methods=['post'])
-    def seed_demo(self, request):
-        """
-        Super Admin-only endpoint to create one of the 5 themed sample SOC Investigation Response
-        scenarios ('expanse', 'star_trek', 'matrix', 'star_wars', 'god_of_war', or 'all').
-        """
-        scenario_key = _clean_query_str(request.data.get('scenario')) or 'expanse'
-        try:
-            created = create_demo_scenario(scenario_key)
-        except ValueError as exc:
-            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        if scenario_key == 'all':
-            serializer = self.get_serializer(created, many=True)
-            return Response(
-                {
-                    'status': 'success',
-                    'scenario': scenario_key,
-                    'count': len(created),
-                    'investigations': serializer.data,
-                    'projects': serializer.data,
-                },
-                status=status.HTTP_201_CREATED,
-            )
-        serializer = self.get_serializer(created[0])
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='bulk-evidence')
     def bulk_evidence(self, request, pk=None):

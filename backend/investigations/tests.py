@@ -350,61 +350,6 @@ class IncidentReporterTests(TestCase):
         self.assertEqual(del_res.status_code, 204)
         self.assertEqual(ev_earlier.screenshots.count(), 0)
 
-    def test_seed_demo_super_admin_only_and_all_four_scenarios(self):
-        # Executive, Analyst, and Admin MUST be denied access to sample incident seeding
-        for non_super in (self.exec_user, self.analyst_user, self.admin_user):
-            self.client.force_authenticate(user=non_super)
-            self.assertEqual(self.client.get("/api/projects/demo_scenarios/").status_code, 403)
-            self.assertEqual(self.client.post("/api/projects/seed_demo/").status_code, 403)
-
-        # Super Admin CAN list and load all 5 themed sample scenarios
-        self.client.force_authenticate(user=self.super_admin)
-        cat_res = self.client.get("/api/projects/demo_scenarios/")
-        self.assertEqual(cat_res.status_code, 200)
-        scenario_ids = [s["id"] for s in cat_res.json()]
-        self.assertEqual(scenario_ids, ["expanse", "star_trek", "matrix", "star_wars", "god_of_war"])
-
-        # 1. Expanse scenario (default)
-        expanse_res = self.client.post("/api/projects/seed_demo/", {"scenario": "expanse"}, format="json")
-        self.assertEqual(expanse_res.status_code, 201)
-        expanse_data = expanse_res.json()
-        self.assertEqual(expanse_data["evidence_count"], 20)
-        self.assertEqual(expanse_data["key_evidence_count"], 7)
-        self.assertEqual(len(expanse_data["external_research_items"]), 3)
-        self.assertGreaterEqual(len(expanse_data["customer_contacts"]), 2)
-        self.assertGreaterEqual(len(expanse_data["related_incidents"]), 2)
-        self.assertTrue(expanse_data["action_plan"])
-
-        first_res_id = expanse_data["external_research_items"][0]["id"]
-        self.assertEqual(self.client.delete(f"/api/external-research/{first_res_id}/").status_code, 204)
-
-        # 2. Star Trek scenario (website compromise + web shells)
-        trek_res = self.client.post("/api/projects/seed_demo/", {"scenario": "star_trek"}, format="json")
-        self.assertEqual(trek_res.status_code, 201)
-        self.assertIn("Web Shell", trek_res.json()["title"])
-        self.assertGreaterEqual(trek_res.json()["key_evidence_count"], 4)
-
-        # 3. Matrix scenario (ClickFix -> DC takeover)
-        matrix_res = self.client.post("/api/projects/seed_demo/", {"scenario": "matrix"}, format="json")
-        self.assertEqual(matrix_res.status_code, 201)
-        self.assertIn("ClickFix", matrix_res.json()["title"])
-        self.assertGreaterEqual(matrix_res.json()["key_evidence_count"], 4)
-
-        # 4. Star Wars scenario (MitM phishing -> spam & multi-account takeover)
-        sw_res = self.client.post("/api/projects/seed_demo/", {"scenario": "star_wars"}, format="json")
-        self.assertEqual(sw_res.status_code, 201)
-        self.assertIn("MitM", sw_res.json()["title"])
-        self.assertGreaterEqual(sw_res.json()["key_evidence_count"], 4)
-
-        # 5. God of War scenario (Fimbulwinter ransomware attack)
-        gow_res = self.client.post("/api/projects/seed_demo/", {"scenario": "god_of_war"}, format="json")
-        self.assertEqual(gow_res.status_code, 201)
-        self.assertIn("Ransomware", gow_res.json()["title"])
-        self.assertEqual(gow_res.json()["customer_name"], "Midgard Realmworks Technologies")
-        self.assertGreaterEqual(gow_res.json()["key_evidence_count"], 4)
-        self.assertEqual(len(gow_res.json()["related_incidents"]), 3)
-        self.assertEqual(len(gow_res.json()["customer_contacts"]), 3)
-
     def test_profile_avatar_preferred_display_name_and_pronouns(self):
         self.client.force_authenticate(user=self.analyst_user)
         avatar_upload = SimpleUploadedFile(
@@ -1798,7 +1743,7 @@ class IncidentReporterTests(TestCase):
         self.assertIsNone(inv.locked_by)
         self.assertIsNone(inv.locked_at)
 
-    def test_markdown_report_pipe_escaping_and_all_five_demo_scenarios(self):
+    def test_markdown_report_pipe_escaping_and_zip_deduplication(self):
         self.client.force_authenticate(user=self.super_admin)
         inv = Investigation.objects.create(
             title="Pipe Escape Report Case",
@@ -1834,19 +1779,6 @@ class IncidentReporterTests(TestCase):
             self.assertEqual(len(md_files), 1)
             md_body = zf.read(md_files[0]).decode("utf-8")
             self.assertIn("\\|", md_body)
-
-        # Verify all 5 demo scenarios (including 'god_of_war') seed cleanly even when INV000001 already exists
-        cat_res = self.client.get("/api/investigations/demo_scenarios/")
-        self.assertEqual(cat_res.status_code, 200)
-        self.assertEqual(len(cat_res.json()), 5)
-
-        seed_all = self.client.post("/api/investigations/seed_demo/", {"scenario": "all"}, format="json")
-        self.assertEqual(seed_all.status_code, 201)
-        self.assertEqual(seed_all.json()["count"], 5)
-
-        # Re-seeding a scenario a second time must also succeed without IntegrityError on investigation_id
-        seed_again = self.client.post("/api/investigations/seed_demo/", {"scenario": "god_of_war"}, format="json")
-        self.assertEqual(seed_again.status_code, 201)
 
 
 

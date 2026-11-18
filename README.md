@@ -132,3 +132,4 @@ cd backend
 - 📄 **[REST API Specification (`API_SPECIFICATION.md`)](API_SPECIFICATION.md)** — Full endpoint schemas and ingestion scripts.
 - 📄 **[Software Bill of Materials (`BOM.md`)](BOM.md)** — Component inventory and license compliance.
 - 📄 **[Theme & Color System (`theme.md`)](theme.md)** — LevelBlue design tokens, status badges, and UI palette.
+- 📄 **[Sample Investigation API Demos (`demo/`)](demo/)** — Standalone API walkthroughs and Python ingestion scripts for sample scenarios.

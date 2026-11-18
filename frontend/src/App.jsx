@@ -35,7 +35,6 @@ import {
   UserPlus,
   Home,
   FolderOpen,
-  Sparkles,
   Settings,
   Image as ImageIcon,
   Network,
@@ -74,34 +73,6 @@ const ROLE_BADGE_BG = {
   ANALYST: 'info',
   EXECUTIVE: 'secondary',
 };
-
-const DEFAULT_DEMO_SCENARIOS = [
-  {
-    id: 'expanse',
-    theme: 'The Expanse',
-    label: 'The Expanse — VPN Intrusion, AD Compromise & Exfiltration',
-  },
-  {
-    id: 'star_trek',
-    theme: 'Star Trek',
-    label: 'Star Trek — Website Compromise & Web Shell Deployment',
-  },
-  {
-    id: 'matrix',
-    theme: 'The Matrix',
-    label: 'The Matrix — ClickFix User Compromise to DC Takeover',
-  },
-  {
-    id: 'star_wars',
-    theme: 'Star Wars',
-    label: 'Star Wars — MitM Phishing, Spam Wave & Multi-Account Takeover',
-  },
-  {
-    id: 'god_of_war',
-    theme: 'God of War',
-    label: 'God of War — Fimbulwinter Ransomware Deployment & Domain Takeover',
-  },
-];
 
 const EMPTY_INVESTIGATION_FORM = {
   investigation_id: '',
@@ -265,7 +236,6 @@ export default function App() {
   const [activeProject, setActiveProject] = useState(null);
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'timeline' | 'reports'
   const [analystDirectory, setAnalystDirectory] = useState([]);
-  const [demoScenarios, setDemoScenarios] = useState(DEFAULT_DEMO_SCENARIOS);
   const [customers, setCustomers] = useState([]);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showQuickCustomer, setShowQuickCustomer] = useState(false);
@@ -300,9 +270,7 @@ export default function App() {
 
   // Navbar dropdown states & outside-click refs
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [showDemoDropdown, setShowDemoDropdown] = useState(false);
   const userDropdownRef = useRef(null);
-  const demoDropdownRef = useRef(null);
   const headerStatusPickerRef = useRef(null);
 
   // Header status picker, Archive warning, & Project delete confirmation modal state
@@ -370,7 +338,6 @@ export default function App() {
   const canManageUsers = Boolean(perms.can_manage_users);
   const canManageAdmins = Boolean(perms.can_manage_admins);
   const canAccessDbAdmin = Boolean(perms.can_access_db_admin);
-  const canSeedDemo = Boolean(perms.can_seed_demo);
 
   const isProjectLocked = Boolean(activeProject?.is_locked);
   const canModifyActiveProject = canEditRole && !isProjectLocked;
@@ -380,9 +347,6 @@ export default function App() {
     const handleOutsideClick = (e) => {
       if (userDropdownRef.current && !userDropdownRef.current.contains(e.target)) {
         setShowUserDropdown(false);
-      }
-      if (demoDropdownRef.current && !demoDropdownRef.current.contains(e.target)) {
-        setShowDemoDropdown(false);
       }
       if (headerStatusPickerRef.current && !headerStatusPickerRef.current.contains(e.target)) {
         setShowHeaderStatusPicker(false);
@@ -417,18 +381,6 @@ export default function App() {
       setAnalystDirectory(list || []);
     } catch {
       // Non-critical autocomplete helper
-    }
-  });
-
-  const loadDemoScenarios = useEventCallback(async () => {
-    if (!canSeedDemo) return;
-    try {
-      const list = await api.getDemoScenarios();
-      if (Array.isArray(list) && list.length > 0) {
-        setDemoScenarios(list);
-      }
-    } catch {
-      // Fall back to built-in catalog metadata
     }
   });
 
@@ -512,7 +464,6 @@ export default function App() {
     if (authUserId) {
       loadProjects(null, true);
       loadAnalystDirectory();
-      loadDemoScenarios();
     } else {
       setProjects([]);
       setSelectedProjectId(null);
@@ -520,7 +471,7 @@ export default function App() {
       setManagedUsers([]);
       setMainView('home');
     }
-  }, [authUserId, loadProjects, loadAnalystDirectory, loadDemoScenarios]);
+  }, [authUserId, loadProjects, loadAnalystDirectory]);
 
   useEffect(() => {
     if (authUser && mainView === 'users' && canManageUsers) {
@@ -718,27 +669,6 @@ export default function App() {
     setMainView('investigations');
     setActiveTab('overview');
     await handleSelectProject(id);
-  });
-
-  const handleSeedDemo = useEventCallback(async (scenarioKey = 'expanse') => {
-    if (!canSeedDemo) return;
-    setShowDemoDropdown(false);
-    try {
-      setLoading(true);
-      const result = await api.seedDemoProject(scenarioKey);
-      const primaryId = result?.primary?.id || result?.id;
-      await loadProjects(primaryId);
-      if (scenarioKey === 'all') {
-        notifySuccess(`Loaded all ${result?.count || demoScenarios?.length || 5} themed sample investigations.`);
-      } else {
-        notifySuccess(`Sample investigation loaded: "${result?.title || scenarioKey}".`);
-        setMainView('investigations');
-      }
-    } catch (err) {
-      handleApiError(err, 'Failed to load sample investigation');
-    } finally {
-      setLoading(false);
-    }
   });
 
   const handleToggleProjectLock = async () => {
@@ -1547,54 +1477,6 @@ export default function App() {
           </div>
 
           <div className="d-flex align-items-center flex-wrap gap-2 ms-auto mt-2 mt-lg-0">
-            {/* Super Admin Only: Load Sample Investigation Dropdown (5 Themed Scenarios) */}
-            {canSeedDemo && (
-              <div className="position-relative" ref={demoDropdownRef}>
-                <Button
-                  className="btn-lb-cyan d-inline-flex align-items-center gap-1"
-                  size="sm"
-                  onClick={() => setShowDemoDropdown((prev) => !prev)}
-                >
-                  <Sparkles size={14} />
-                  <span>Load Sample Investigation</span>
-                  <ChevronDown size={13} />
-                </Button>
-
-                {showDemoDropdown && (
-                  <div className="soc-dropdown-panel shadow-lg p-2" style={{ minWidth: '340px' }}>
-                    <div className="px-2 py-1 small text-secondary border-bottom border-secondary mb-1">
-                      Super Admin Demo Scenarios
-                    </div>
-                    {demoScenarios.map((sc) => (
-                      <button
-                        key={sc.id}
-                        type="button"
-                        className="soc-dropdown-item flex-column align-items-start gap-0"
-                        onClick={() => handleSeedDemo(sc.id)}
-                      >
-                        <span className="fw-semibold text-lb-cyan">{sc.label}</span>
-                        {sc.customer_name && (
-                          <span className="text-secondary" style={{ fontSize: '0.75rem' }}>
-                            Customer: {sc.customer_name}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                    <div className="border-top border-secondary mt-1 pt-1">
-                      <button
-                        type="button"
-                        className="soc-dropdown-item text-lb-lime fw-semibold"
-                        onClick={() => handleSeedDemo('all')}
-                      >
-                        <Sparkles size={14} />
-                        <span>Load All {demoScenarios?.length || 5} Sample Investigations</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
             {canEditRole && (
               <Button className="btn-lb-green" size="sm" onClick={openNewProjectModal}>
                 <Plus size={15} className="me-1" />
@@ -1758,11 +1640,8 @@ export default function App() {
             projects={projects}
             loading={loading}
             canEditRole={canEditRole}
-            canSeedDemo={canSeedDemo}
             onOpenInvestigation={handleOpenInvestigationFromHome}
             onOpenNewProject={openNewProjectModal}
-            onSeedDemoScenario={handleSeedDemo}
-            demoScenarios={demoScenarios}
           />
         ) : mainView === 'users' && canManageUsers ? (
           /* ==================== USER MANAGEMENT VIEW (ADMIN & SUPER ADMIN) ==================== */
@@ -2060,11 +1939,6 @@ export default function App() {
                         <Button className="btn-lb-green" onClick={openNewProjectModal}>
                           <Plus size={15} className="me-1" />
                           New Investigation
-                        </Button>
-                      )}
-                      {canSeedDemo && (
-                        <Button className="btn-lb-cyan" onClick={() => handleSeedDemo('expanse')}>
-                          Load Sample Investigation
                         </Button>
                       )}
                     </div>

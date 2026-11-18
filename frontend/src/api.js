@@ -250,13 +250,6 @@ export const api = {
     request(`/investigations/${enc(id)}/unlock/`, {
       method: 'POST',
     }),
-  getDemoScenarios: () => request('/investigations/demo_scenarios/'),
-  seedDemoProject: (scenario = 'expanse') =>
-    request('/investigations/seed_demo/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scenario }),
-    }),
 
   // Evidence Items
   createEvidence: (formData) =>

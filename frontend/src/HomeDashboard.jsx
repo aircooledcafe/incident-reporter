@@ -6,7 +6,6 @@ import {
   Plus,
   ClipboardList,
   ArrowUpDown,
-  Sparkles,
 } from 'lucide-react';
 import { safeHref } from './api';
 
@@ -40,11 +39,8 @@ export default function HomeDashboard({
   projects,
   loading,
   canEditRole,
-  canSeedDemo,
   onOpenInvestigation,
   onOpenNewProject,
-  onSeedDemoScenario,
-  demoScenarios,
 }) {
   // Filter toggle: 'open' (default) | 'all' | status | 'archived' | 'locked'
   const [viewFilter, setViewFilter] = useState('open');
@@ -222,16 +218,6 @@ export default function HomeDashboard({
                 <Button className="btn-lb-green" size="sm" onClick={onOpenNewProject}>
                   <Plus size={14} className="me-1" />
                   New Investigation
-                </Button>
-              )}
-              {canSeedDemo && demoScenarios && demoScenarios.length > 0 && (
-                <Button
-                  className="btn-lb-cyan"
-                  size="sm"
-                  onClick={() => onSeedDemoScenario('all')}
-                >
-                  <Sparkles size={14} className="me-1" />
-                  Load All {demoScenarios.length} Demo Investigations
                 </Button>
               )}
             </div>
