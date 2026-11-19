@@ -128,7 +128,7 @@ cd backend
 
 ## Documentation & Reference
 
-- 📄 **[AWS Production Deployment Guide (`DEPLOYMENT_AWS.md`)](DEPLOYMENT_AWS.md)** — Step-by-step EC2 setup, EBS persistence, and Cloudflare Tunnel guide.
+- 📄 **[AWS Production Deployment Guide (`DEPLOYMENT_AWS.md`)](DEPLOYMENT_AWS.md)** — Step-by-step EC2 setup and dedicated EBS persistence guide.
 - 📄 **[REST API Specification (`API_SPECIFICATION.md`)](API_SPECIFICATION.md)** — Full endpoint schemas and ingestion scripts.
 - 📄 **[Software Bill of Materials (`BOM.md`)](BOM.md)** — Component inventory and license compliance.
 - 📄 **[Theme & Color System (`theme.md`)](theme.md)** — LevelBlue design tokens, status badges, and UI palette.

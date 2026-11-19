@@ -8,7 +8,7 @@ This guide walks through deploying the **SOC Incident Response Evidence & Timeli
 
 ```mermaid
 flowchart TD
-    Internet([Users / SOC Analysts / Cloudflare Tunnel])
+    Internet([Users / SOC Analysts])
     
     subgraph VPC["AWS VPC (Public/Private Subnet)"]
         subgraph EC2["AWS EC2 Instance (Ubuntu 24.04 LTS / t4g.micro or t4g.small)"]
@@ -24,7 +24,7 @@ flowchart TD
         end
     end
 
-    Internet -->|HTTPS / Tunnel| Frontend
+    Internet -->|HTTPS| Frontend
     Frontend --> Backend
     Backend -->|HOST_DB_DIR| DBData
     Backend -->|HOST_ARTIFACTS_DIR| ArtifactsData
@@ -41,7 +41,7 @@ flowchart TD
 ## Prerequisites
 
 1. An **AWS Account** with permissions to launch EC2 instances and manage EBS volumes.
-2. A **Domain name** managed via Cloudflare or Route 53 (if exposing via HTTPS).
+2. A **Domain name** (e.g., via Route 53, if exposing via HTTPS).
 3. An **SSH key pair** for EC2 access.
 
 ---
@@ -57,8 +57,7 @@ flowchart TD
 - **Root Volume**: Default 20 GiB `gp3` (for OS, Docker binaries, and system packages).
 - **Network / Security Group**:
   - Inbound SSH (Port 22) restricted to your IP.
-  - If using **Cloudflare Tunnel (recommended)**: **No inbound web ports need to be open** (all outbound 443).
-  - If using direct Nginx ingress: Allow Inbound Ports 80 and 443.
+  - Inbound HTTP/HTTPS (Ports 80 and 443) or Port 5173 restricted to your corporate network / reverse proxy.
 - **Availability Zone**: Take note of the exact AZ (e.g. `us-east-1a`).
 
 ### 2. Create the Dedicated EBS Data Volume
@@ -211,8 +210,8 @@ DJANGO_SECRET_KEY=YOUR_GENERATED_SECRET_KEY_HERE
 DJANGO_DEBUG=False
 DJANGO_ALLOWED_HOSTS=*
 
-# If using Cloudflare Tunnel or custom domain:
-DJANGO_CSRF_TRUSTED_ORIGINS=https://soc.yourcompany.com,https://*.trycloudflare.com
+# If using a custom domain / reverse proxy:
+DJANGO_CSRF_TRUSTED_ORIGINS=https://soc.yourcompany.com
 
 # Dedicated Attached EBS Storage Paths
 HOST_DB_DIR=/mnt/incident-data/db
@@ -236,7 +235,7 @@ docker compose up -d --build
 ```bash
 docker compose ps
 ```
-All 3 containers (`incident-reporter-db`, `incident-reporter-backend`, and `incident-reporter-frontend`) should show status `Up (healthy)`.
+Both containers (`incident-reporter-backend` and `incident-reporter-frontend`) should show status `Up (healthy)`.
 
 Check migration logs:
 ```bash
@@ -245,49 +244,7 @@ docker compose logs -f backend
 
 ---
 
-## Step 6: Exposing Securely via Cloudflare Tunnel (Zero Open Ports)
-
-Using **Cloudflare Tunnel (`cloudflared`)** eliminates the need to expose port 80/443 directly to the public internet or manage inbound Security Group rules.
-
-### 1. Install `cloudflared` on the EC2 Host
-```bash
-curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$(dpkg --print-architecture).deb
-sudo dpkg -i cloudflared.deb
-```
-
-### 2. Authenticate & Create Tunnel
-```bash
-cloudflared tunnel login
-cloudflared tunnel create incident-reporter
-```
-
-### 3. Route Domain Traffic
-```bash
-cloudflared tunnel route dns incident-reporter soc.yourcompany.com
-```
-
-### 4. Configure Tunnel
-Create `/etc/cloudflared/config.yml`:
-```yaml
-tunnel: <TUNNEL_ID>
-credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
-
-ingress:
-  - hostname: soc.yourcompany.com
-    service: http://127.0.0.1:5173
-  - service: http_status:404
-```
-
-### 5. Install as a Systemd Service
-```bash
-sudo cloudflared service install
-sudo systemctl enable --now cloudflared
-```
-The application is now accessible securely over HTTPS at `https://soc.yourcompany.com`.
-
----
-
-## Step 7: Automated Backups & Disaster Recovery
+## Step 6: Automated Backups & Disaster Recovery
 
 ### Automated EBS Snapshots via AWS DLM
 1. Go to **AWS Console > EC2 > Lifecycle Manager**.

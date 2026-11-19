@@ -15,7 +15,7 @@ This guide provides step-by-step instructions, formatted JSON payloads, cURL com
 
 When targeting a deployed instance on a customer or corporate domain:
 - **Production Domain**: The web application and reverse proxy (Nginx / ALB) listen on standard HTTPS (port 443). Nginx automatically proxies `/api/` requests internally to the Django backend.
-  - **Base URL**: `https://soc-demo.aircooledcafe.com/api`
+  - **Base URL**: `https://soc.example.com/api`
   - **Do NOT target port 8000 in production.** Port 8000 is internal to the container network and is not exposed to external clients.
 - **Local Development**: When running locally without a reverse proxy or TLS cert:
   - **Base URL**: `http://localhost:8000/api` (direct backend) or `http://localhost:5173/api` (via Vite proxy)
@@ -23,7 +23,7 @@ When targeting a deployed instance on a customer or corporate domain:
 Set your environment variables before running the commands below:
 ```bash
 # Set to your domain (or http://localhost:8000/api for local development)
-export API_BASE="https://soc-demo.aircooledcafe.com/api"
+export API_BASE="https://soc.example.com/api"
 export API_TOKEN="YOUR_API_TOKEN_HERE"
 ```
 
@@ -347,7 +347,7 @@ This script automatically executes the entire workflow without knowing any datab
 3. Creates the investigation `"INV123456"` referencing `"CANTON-FIN-01"`.
 4. Posts **Item 1** via the individual single-item endpoint with `"investigation": "INV123456"`.
 5. Posts **Items 2–12** in a single call via the **bulk endpoint** with `"investigation": "INV123456"`.
-6. Queries `https://soc-demo.aircooledcafe.com/api/investigations/INV123456/` and verifies that all 12 items are in the timeline.
+6. Queries `https://soc.example.com/api/investigations/INV123456/` and verifies that all 12 items are in the timeline.
 
 ```python
 #!/usr/bin/env python3
@@ -365,8 +365,8 @@ import sys
 import requests
 
 # Base URL: Use your deployed domain or local dev
-# In production on soc-demo.aircooledcafe.com, target https://soc-demo.aircooledcafe.com/api (no port 8000)
-API_BASE = os.environ.get("API_BASE", "https://soc-demo.aircooledcafe.com/api")
+# In production on soc.example.com, target https://soc.example.com/api (no port 8000)
+API_BASE = os.environ.get("API_BASE", "https://soc.example.com/api")
 API_TOKEN = os.environ.get("API_TOKEN", "YOUR_API_TOKEN_HERE")
 
 CUSTOMER_CODE = "CANTON-FIN-01"

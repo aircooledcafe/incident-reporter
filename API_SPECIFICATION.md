@@ -7,7 +7,7 @@ This document provides a comprehensive reference and usage guide for the **Incid
 ## 1. Architecture & Protocol Overview
 
 - **Base URL**:
-  - **Deployed / Customer Domain**: `https://soc-demo.aircooledcafe.com/api` (Standard HTTPS on port 443. The reverse proxy / Nginx routes `/api/` traffic directly to the backend. **Do not target port 8000 on a deployed domain**).
+  - **Deployed / Customer Domain**: `https://soc.example.com/api` (Standard HTTPS on port 443. The reverse proxy / Nginx routes `/api/` traffic directly to the backend. **Do not target port 8000 on a deployed domain**).
   - **Local Development**: `http://localhost:8000/api` (direct backend) or `http://localhost:5173/api` (Vite dev proxy).
 - **Data Exchange Format**: `application/json` (UTF-8 encoded) for all endpoints, except file uploads (`multipart/form-data`) and exported reports (`text/csv`, `text/markdown`, `application/zip`, `application/vnd.oasis.opendocument.text`).
 - **Defanging & Sanitization**: Any IP addresses, hostnames, and URLs submitted via the API or web interface are automatically defanged when rendered in timeline summaries and reports (e.g. `10[.]10[.]10[.]10`, `hxxp://...`).
@@ -71,7 +71,7 @@ Lists all registered customer organizations.
 Retrieves a customer organization directly by its `customer_id` code (e.g. `/api/customers/SCAD-01/`) or numeric PK.
 
 ```bash
-curl -X GET https://soc-demo.aircooledcafe.com/api/customers/SCAD-01/ \
+curl -X GET https://soc.example.com/api/customers/SCAD-01/ \
   -H "Authorization: Token <TOKEN>"
 ```
 
@@ -104,7 +104,7 @@ curl -X GET https://soc-demo.aircooledcafe.com/api/customers/SCAD-01/ \
 #### `POST /api/customers/`
 Creates a new customer organization.
 ```bash
-curl -X POST https://soc-demo.aircooledcafe.com/api/customers/ \
+curl -X POST https://soc.example.com/api/customers/ \
   -H "Authorization: Token <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -124,7 +124,7 @@ Deletes a customer organization (referenced by its `customer_id` or PK).
 #### `POST /api/customer-contacts/`
 Adds an escalation contact to a customer organization. The `customer` field accepts the business `customer_id` code:
 ```bash
-curl -X POST https://soc-demo.aircooledcafe.com/api/customer-contacts/ \
+curl -X POST https://soc.example.com/api/customer-contacts/ \
   -H "Authorization: Token <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -475,9 +475,9 @@ import os
 import sys
 import requests
 
-# Base URL: In production, target the HTTPS domain (e.g. https://soc-demo.aircooledcafe.com/api)
+# Base URL: In production, target the HTTPS domain (e.g. https://soc.example.com/api)
 # For local dev without reverse proxy: http://localhost:8000/api
-API_BASE = os.environ.get("API_BASE", "https://soc-demo.aircooledcafe.com/api")
+API_BASE = os.environ.get("API_BASE", "https://soc.example.com/api")
 API_TOKEN = os.environ.get("API_TOKEN", "7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b")
 
 HEADERS = {
